@@ -1,4 +1,4 @@
-module curling
+module github.com/aoliveti/curling
 
 go 1.21
 
