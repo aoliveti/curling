@@ -33,11 +33,27 @@ func Test_NewFromRequest_body(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "short form no body",
+			name: "short form nil body",
 			args: args{
 				r: &http.Request{
 					URL:    testUrl,
 					Method: http.MethodPost,
+				},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl -X 'POST' 'https://localhost/test'",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "short form http.NoBody",
+			args: args{
+				r: &http.Request{
+					URL:    testUrl,
+					Method: http.MethodPost,
+					Body:   http.NoBody,
 				},
 			},
 			want: &Command{
@@ -61,11 +77,29 @@ func Test_NewFromRequest_body(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "long form no body",
+			name: "long form nil body",
 			args: args{
 				r: &http.Request{
 					URL:    testUrl,
 					Method: http.MethodPost,
+				},
+				opts: []Option{WithLongForm()},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl --request 'POST' 'https://localhost/test'",
+				},
+				useLongForm: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "long form http.NoBody",
+			args: args{
+				r: &http.Request{
+					URL:    testUrl,
+					Method: http.MethodPost,
+					Body:   http.NoBody,
 				},
 				opts: []Option{WithLongForm()},
 			},
