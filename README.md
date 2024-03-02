@@ -22,13 +22,13 @@ The following Go code demonstrates how to create a command from an HTTP request 
 ```go
 req, err := http.NewRequest(http.MethodGet, "https://www.google.com", nil)
 if err != nil {
-panic(err)
+    panic(err)
 }
 req.Header.Add("If-None-Match", "foo")
 
 cmd, err := curling.NewFromRequest(req, curling.WithCompression())
 if err != nil {
-panic(err)
+    panic(err)
 }
 
 fmt.Println(cmd)
@@ -56,6 +56,7 @@ When creating a new command, you can provide these options:
 | WithMultiLine()           | Generates a multiline snippet for unix-like shell |
 | WithWindowsMultiLine()    | Generates a multiline snippet for Windows shell   |
 | WithPowerShellMultiLine() | Generates a multiline snippet for PowerShell      |
+| WithDoubleQuotes()        | Uses double quotes to escape characters           |
 
 ## License
 

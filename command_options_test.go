@@ -190,6 +190,22 @@ func Test_NewFromRequest_options(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "double quotes option",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
+				},
+				opts: []Option{WithDoubleQuotes()},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl -X \"GET\" \"https://localhost/test\"",
+				},
+				useDoubleQuotes: true,
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

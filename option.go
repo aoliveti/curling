@@ -58,3 +58,9 @@ func WithPowerShellMultiLine() Option {
 		curling.lineContinuation = lineContinuationPowerShell
 	}
 }
+
+func WithDoubleQuotes() Option {
+	return func(curling *Command) {
+		curling.useDoubleQuotes = true
+	}
+}
