@@ -6,46 +6,6 @@ import (
 	"testing"
 )
 
-func Test_escape(t *testing.T) {
-	type args struct {
-		s string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "without single quotes",
-			args: args{
-				s: "",
-			},
-			want: "''",
-		},
-		{
-			name: "with one single quotes",
-			args: args{
-				s: "'",
-			},
-			want: "''\\'''",
-		},
-		{
-			name: "with two single quotes",
-			args: args{
-				s: "'v'",
-			},
-			want: "''\\''v'\\'''",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := escape(tt.args.s); got != tt.want {
-				t.Errorf("escape() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCommand_String(t *testing.T) {
 	type fields struct {
 		tokens           []string
@@ -164,6 +124,85 @@ func TestCommand_optionForm(t *testing.T) {
 			}
 			if got := c.optionForm(tt.args.short, tt.args.long); got != tt.want {
 				t.Errorf("optionForm() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommand_escape(t *testing.T) {
+	type fields struct {
+		tokens          []string
+		useDoubleQuotes bool
+	}
+	type args struct {
+		s string
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   string
+	}{
+		{
+			name: "without single quotes",
+			args: args{
+				s: "",
+			},
+			want: "''",
+		},
+		{
+			name: "with one single quotes",
+			args: args{
+				s: "'",
+			},
+			want: "''\\'''",
+		},
+		{
+			name: "with two single quotes",
+			args: args{
+				s: "'v'",
+			},
+			want: "''\\''v'\\'''",
+		},
+		{
+			name: "without double quotes",
+			fields: fields{
+				useDoubleQuotes: true,
+			},
+			args: args{
+				s: "",
+			},
+			want: "\"\"",
+		},
+		{
+			name: "with one double quotes",
+			fields: fields{
+				useDoubleQuotes: true,
+			},
+			args: args{
+				s: "\"",
+			},
+			want: "\"\\\"\"",
+		},
+		{
+			name: "with two double quotes",
+			fields: fields{
+				useDoubleQuotes: true,
+			},
+			args: args{
+				s: "\"v\"",
+			},
+			want: "\"\\\"v\\\"\"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Command{
+				tokens:          tt.fields.tokens,
+				useDoubleQuotes: tt.fields.useDoubleQuotes,
+			}
+			if got := c.escape(tt.args.s); got != tt.want {
+				t.Errorf("escape() = %v, want %v", got, tt.want)
 			}
 		})
 	}

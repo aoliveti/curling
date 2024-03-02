@@ -13,12 +13,13 @@ type Command struct {
 	tokens           []string
 	lineContinuation string
 
-	location     bool
-	compressed   bool
-	insecure     bool
-	useLongForm  bool
-	useMultiLine bool
-	silent       bool
+	location        bool
+	compressed      bool
+	insecure        bool
+	useLongForm     bool
+	useMultiLine    bool
+	silent          bool
+	useDoubleQuotes bool
 }
 
 func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
@@ -52,6 +53,16 @@ func (c *Command) optionForm(short, long string) string {
 	}
 
 	return short
+}
+
+func (c *Command) escape(s string) string {
+	if c.useDoubleQuotes {
+		v := strings.ReplaceAll(s, "\"", "\\\"")
+		return fmt.Sprintf("\"%s\"", v)
+	}
+
+	v := strings.ReplaceAll(s, "'", "'\\''")
+	return fmt.Sprintf("'%s'", v)
 }
 
 func (c *Command) build(r *http.Request, opts ...Option) error {
@@ -105,8 +116,8 @@ func (c *Command) buildCommand(r *http.Request) {
 	c.appendToken(
 		command,
 		c.optionForm("-X", "--request"),
-		escape(method),
-		escape(r.URL.String()),
+		c.escape(method),
+		c.escape(r.URL.String()),
 	)
 }
 
@@ -124,7 +135,7 @@ func (c *Command) buildHeaders(r *http.Request) {
 		for _, header := range headers {
 			c.appendToken(
 				c.optionForm("-H", "--header"),
-				escape(header),
+				c.escape(header),
 			)
 		}
 	}
@@ -141,13 +152,8 @@ func (c *Command) buildData(r *http.Request) error {
 		r.Body = io.NopCloser(bytes.NewBuffer(b.Bytes()))
 
 		option := c.optionForm("-d", "--data")
-		c.appendToken(option, escape(b.String()))
+		c.appendToken(option, c.escape(b.String()))
 	}
 
 	return nil
-}
-
-func escape(s string) string {
-	v := strings.ReplaceAll(s, "'", "'\\''")
-	return fmt.Sprintf("'%s'", v)
 }
