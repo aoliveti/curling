@@ -14,21 +14,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+    - uses: actions/checkout@v3
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
 
-      - name: Build
-        run: go build -v ./...
+    - name: Build
+      run: go build -v ./...
 
-      - name: Test
-        run: go test -coverprofile coverage.out -v ./...
+    - name: Test
+      run: go test -race -coverprofile=coverage.txt -covermode=atomic
 
-      - name: Update coverage badge
-        uses: ncruces/go-coverage-report@v0
-        with:
-            coverage-file: coverage.out
-            amend: true
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v4.0.1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        slug: aoliveti/curling
