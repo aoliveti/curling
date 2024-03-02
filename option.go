@@ -32,6 +32,12 @@ func WithLongForm() Option {
 	}
 }
 
+func WithSilent() Option {
+	return func(curling *Command) {
+		curling.silent = true
+	}
+}
+
 func WithMultiLine() Option {
 	return func(curling *Command) {
 		curling.useMultiLine = true

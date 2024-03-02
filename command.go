@@ -18,6 +18,7 @@ type Command struct {
 	insecure     bool
 	useLongForm  bool
 	useMultiLine bool
+	silent       bool
 }
 
 func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
@@ -74,6 +75,10 @@ func (c *Command) build(r *http.Request, opts ...Option) error {
 
 func (c *Command) buildCommand(r *http.Request) {
 	s := []string{"curl"}
+
+	if c.silent {
+		s = append(s, c.optionForm("-s", "--silent"))
+	}
 
 	if c.insecure {
 		s = append(s, c.optionForm("-k", "--insecure"))
