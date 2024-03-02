@@ -20,18 +20,30 @@ go get -u github.com/aoliveti/curling
 The following Go code demonstrates how to create a command from an HTTP request object:
 
 ```go
-req, err := http.NewRequest(http.MethodGet, "https://www.google.com", nil)
-if err != nil {
-    panic(err)
-}
-req.Header.Add("If-None-Match", "foo")
+package main
 
-cmd, err := curling.NewFromRequest(req, curling.WithCompression())
-if err != nil {
-    panic(err)
-}
+import (
+	"fmt"
+	"log"
+	"net/http"
 
-fmt.Println(cmd)
+	"github.com/aoliveti/curling"
+)
+
+func main() {
+	req, err := http.NewRequest(http.MethodGet, "https://www.google.com", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	req.Header.Add("If-None-Match", "foo")
+
+	cmd, err := curling.NewFromRequest(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(cmd)
+}
 ```
 
 ```sh
