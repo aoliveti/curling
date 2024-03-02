@@ -57,6 +57,22 @@ func Test_NewFromRequest_options(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "short silent option",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
+				},
+				opts: []Option{WithSilent()},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl -s -X 'GET' 'https://localhost/test'",
+				},
+				silent: true,
+			},
+			wantErr: false,
+		},
+		{
 			name: "long location option",
 			args: args{
 				r: &http.Request{
@@ -87,6 +103,23 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				useLongForm: true,
 				insecure:    true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "long silent option",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
+				},
+				opts: []Option{WithSilent(), WithLongForm()},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl --silent --request 'GET' 'https://localhost/test'",
+				},
+				useLongForm: true,
+				silent:      true,
 			},
 			wantErr: false,
 		},
