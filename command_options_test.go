@@ -73,6 +73,38 @@ func Test_NewFromRequest_options(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "short request timeout option (positive value)",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
+				},
+				opts: []Option{WithRequestTimeout(5)},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl -m 5 -X 'GET' 'https://localhost/test'",
+				},
+				requestTimeout: 5,
+			},
+			wantErr: false,
+		},
+		{
+			name: "short request timeout option (negative value)",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
+				},
+				opts: []Option{WithRequestTimeout(-5)},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl -X 'GET' 'https://localhost/test'",
+				},
+				requestTimeout: 0,
+			},
+			wantErr: false,
+		},
+		{
 			name: "long location option",
 			args: args{
 				r: &http.Request{
@@ -120,6 +152,40 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				useLongForm: true,
 				silent:      true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "long request timeout option (positive value)",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
+				},
+				opts: []Option{WithLongForm(), WithRequestTimeout(5)},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl --max-time 5 --request 'GET' 'https://localhost/test'",
+				},
+				useLongForm:    true,
+				requestTimeout: 5,
+			},
+			wantErr: false,
+		},
+		{
+			name: "long request timeout option (negative value)",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
+				},
+				opts: []Option{WithLongForm(), WithRequestTimeout(-5)},
+			},
+			want: &Command{
+				tokens: []string{
+					"curl --request 'GET' 'https://localhost/test'",
+				},
+				useLongForm:    true,
+				requestTimeout: 0,
 			},
 			wantErr: false,
 		},
