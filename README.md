@@ -61,17 +61,18 @@ func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
 
 When creating a new command, you can provide these options:
 
-| Option                    | Description                                       |
-|---------------------------|---------------------------------------------------|
-| WithLongForm()            | Enables the long form for cURL options            |
-| WithFollowRedirects()     | Sets the flag -L, --location                      |
-| WithInsecure()            | Sets the flag -k, --insecure                      |
-| WithSilent()              | Sets the flag -s, --silent                        |
-| WithCompressed()          | Sets the flag --compressed                        |
-| WithMultiLine()           | Generates a multiline snippet for unix-like shell |
-| WithWindowsMultiLine()    | Generates a multiline snippet for Windows shell   |
-| WithPowerShellMultiLine() | Generates a multiline snippet for PowerShell      |
-| WithDoubleQuotes()        | Uses double quotes to escape characters           |
+| Option                          | Description                                       |
+|---------------------------------|---------------------------------------------------|
+| WithLongForm()                  | Enables the long form for cURL options            |
+| WithFollowRedirects()           | Sets the flag -L, --location                      |
+| WithInsecure()                  | Sets the flag -k, --insecure                      |
+| WithSilent()                    | Sets the flag -s, --silent                        |
+| WithCompressed()                | Sets the flag --compressed                        |
+| WithMultiLine()                 | Generates a multiline snippet for unix-like shell |
+| WithWindowsMultiLine()          | Generates a multiline snippet for Windows shell   |
+| WithPowerShellMultiLine()       | Generates a multiline snippet for PowerShell      |
+| WithDoubleQuotes()              | Uses double quotes to escape characters           |
+| WithRequestTimeout(seconds int) | Sets the flag -m, --max-time                      |
 
 ## License
 

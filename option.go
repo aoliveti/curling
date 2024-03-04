@@ -22,7 +22,7 @@ func WithCompression() Option {
 	}
 }
 
-// WithInsecure enables the option [-k, --insecure]
+// WithInsecure enables the option -k, --insecure.
 func WithInsecure() Option {
 	return func(curling *Command) {
 		curling.insecure = true
@@ -75,5 +75,19 @@ func WithPowerShellMultiLine() Option {
 func WithDoubleQuotes() Option {
 	return func(curling *Command) {
 		curling.useDoubleQuotes = true
+	}
+}
+
+// WithRequestTimeout enables the option -m, --max-time.
+// It sets the number of seconds the request should wait
+// for a response before timing out.
+// Negative value seconds will be silently ignored.
+func WithRequestTimeout(seconds int) Option {
+	return func(curling *Command) {
+		if seconds < 0 {
+			seconds = 0
+		}
+
+		curling.requestTimeout = seconds
 	}
 }

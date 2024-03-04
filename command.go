@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -41,6 +42,9 @@ type Command struct {
 
 	// useDoubleQuotes enables escaping using double quotes.
 	useDoubleQuotes bool
+
+	// requestTimeout enables the option -m, --max-time.
+	requestTimeout int
 }
 
 // NewFromRequest returns a new [Command] that reads from r.
@@ -122,6 +126,10 @@ func (c *Command) buildCommand(r *http.Request) {
 
 	if c.silent {
 		s = append(s, c.optionForm("-s", "--silent"))
+	}
+
+	if c.requestTimeout > 0 {
+		s = append(s, c.optionForm("-m", "--max-time"), strconv.Itoa(c.requestTimeout))
 	}
 
 	if c.insecure {

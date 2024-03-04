@@ -1,10 +1,26 @@
 package curling
 
 import (
+	"fmt"
 	"github.com/google/go-cmp/cmp"
 	"net/http"
+	"net/url"
 	"testing"
 )
+
+// A readerWithError is a fake reader, so the [Read] method return always an error
+type readerWithError struct{}
+
+// Close return always nil
+func (r readerWithError) Close() error {
+	return nil
+}
+
+// Read ignores the value of p and return always an error
+func (r readerWithError) Read(p []byte) (n int, err error) {
+	_ = p
+	return 0, fmt.Errorf("error reading data")
+}
 
 func TestCommand_String(t *testing.T) {
 	type fields struct {
@@ -224,6 +240,19 @@ func Test_NewFromRequest(t *testing.T) {
 			args: args{
 				r: &http.Request{
 					URL: nil,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "error reading body",
+			args: args{
+				r: &http.Request{
+					URL: &url.URL{
+						Scheme: "https",
+						Host:   "localhost",
+					},
+					Body: readerWithError{},
 				},
 			},
 			wantErr: true,
