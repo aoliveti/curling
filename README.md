@@ -1,5 +1,6 @@
 # curling
 
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/aoliveti/curling)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/aoliveti/curling/go.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/aoliveti/curling)](https://pkg.go.dev/github.com/aoliveti/curling)
 [![codecov](https://codecov.io/gh/aoliveti/curling/graph/badge.svg?token=3L9FOZMEJH)](https://codecov.io/gh/aoliveti/curling)
@@ -47,13 +48,15 @@ func main() {
 ```
 
 ```sh
-curl --compressed -X 'GET' 'https://www.google.com' -H 'If-None-Match: foo'
+curl -X 'GET' 'https://www.google.com' -H 'If-None-Match: foo'
 ```
 
 ### Options
 
 ```go
-c, err := curling.NewFromRequest(r, opts)
+func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
+    ...
+}
 ```
 
 When creating a new command, you can provide these options:
@@ -72,4 +75,4 @@ When creating a new command, you can provide these options:
 
 ## License
 
-The library is released under the MIT license. See LICENSE file.
+The library is released under the MIT license. See [LICENSE](LICENSE) file.
