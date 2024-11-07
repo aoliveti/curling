@@ -1,3 +1,5 @@
+![curling logo](assets/images/logo.png)
+
 # curling
 
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/aoliveti/curling)
