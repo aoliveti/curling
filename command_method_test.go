@@ -1,13 +1,18 @@
 package curling
 
 import (
-	"github.com/google/go-cmp/cmp"
+	"bytes"
+	"io"
 	"net/http"
 	"net/url"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_NewFromRequest_methods(t *testing.T) {
+	t.Parallel()
+
 	testUrl := &url.URL{
 		Scheme: "https",
 		Host:   "localhost",
@@ -21,8 +26,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *Command
-		wantErr bool
+		want    string
+		wantErr assert.ErrorAssertionFunc
 	}{
 		{
 			name: "short empty method",
@@ -32,12 +37,32 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'GET' 'https://localhost/test'",
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short empty method with http.NoBody",
+			args: args{
+				r: &http.Request{
+					URL:  testUrl,
+					Body: http.NoBody,
 				},
+				opts: nil,
 			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short empty method with body",
+			args: args{
+				r: &http.Request{
+					URL:  testUrl,
+					Body: io.NopCloser(bytes.NewReader([]byte("{}"))),
+				},
+				opts: nil,
+			},
+			want:    "curl --data-raw '{}' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short get method",
@@ -48,12 +73,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'GET' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short post method",
@@ -64,12 +85,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'POST' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'POST' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short patch method",
@@ -80,12 +97,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'PATCH' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'PATCH' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short head method",
@@ -96,12 +109,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'HEAD' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'HEAD' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short put method",
@@ -112,12 +121,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'PUT' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'PUT' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short delete method",
@@ -128,12 +133,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'DELETE' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'DELETE' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short options method",
@@ -144,12 +145,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'OPTIONS' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'OPTIONS' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short connect method",
@@ -160,12 +157,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'CONNECT' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'CONNECT' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short trace method",
@@ -176,12 +169,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: nil,
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'TRACE' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'TRACE' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long empty method",
@@ -191,13 +180,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'GET' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long get method",
@@ -208,13 +192,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'GET' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long post method",
@@ -225,13 +204,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'POST' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'POST' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long patch method",
@@ -242,13 +216,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'PATCH' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'PATCH' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long head method",
@@ -259,13 +228,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'HEAD' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'HEAD' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long put method",
@@ -276,13 +240,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'PUT' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'PUT' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long delete method",
@@ -293,13 +252,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'DELETE' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'DELETE' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long options method",
@@ -310,13 +264,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'OPTIONS' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'OPTIONS' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long connect method",
@@ -327,13 +276,8 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'CONNECT' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'CONNECT' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long trace method",
@@ -344,27 +288,21 @@ func Test_NewFromRequest_methods(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'TRACE' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'TRACE' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := NewFromRequest(tt.args.r, tt.args.opts...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewFromRequest() error = %v, wantErr %v", err, tt.wantErr)
+
+			if !tt.wantErr(t, err, "NewFromRequest() error") {
 				return
 			}
 
-			optUnexported := cmp.AllowUnexported(Command{})
-			if !cmp.Equal(got, tt.want, optUnexported) {
-				t.Errorf("NewFromRequest() got = %v, want = %v, diff = %v", got, tt.want, cmp.Diff(got, tt.want, optUnexported))
-			}
+			assert.Equal(t, tt.want, got.String())
 		})
 	}
 }
