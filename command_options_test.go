@@ -1,17 +1,29 @@
 package curling
 
 import (
-	"github.com/google/go-cmp/cmp"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_NewFromRequest_options(t *testing.T) {
+	t.Parallel()
+
 	testUrl := &url.URL{
 		Scheme: "https",
 		Host:   "localhost",
 		Path:   "test",
+	}
+
+	specialTestUrl := &url.URL{
+		Scheme:   "https",
+		Host:     "localhost",
+		Path:     "test",
+		RawQuery: `q="hello $user"`,
 	}
 
 	type args struct {
@@ -21,8 +33,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *Command
-		wantErr bool
+		want    string
+		wantErr assert.ErrorAssertionFunc
 	}{
 		{
 			name: "short location option",
@@ -32,13 +44,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithFollowRedirects()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -L -X 'GET' 'https://localhost/test'",
-				},
-				location: true,
-			},
-			wantErr: false,
+			want:    "curl -L 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short insecure option",
@@ -48,13 +55,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithInsecure()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -k -X 'GET' 'https://localhost/test'",
-				},
-				insecure: true,
-			},
-			wantErr: false,
+			want:    "curl -k 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short silent option",
@@ -64,13 +66,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithSilent()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -s -X 'GET' 'https://localhost/test'",
-				},
-				silent: true,
-			},
-			wantErr: false,
+			want:    "curl -s 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short request timeout option (positive value)",
@@ -80,13 +77,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithRequestTimeout(5)},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -m 5 -X 'GET' 'https://localhost/test'",
-				},
-				requestTimeout: 5,
-			},
-			wantErr: false,
+			want:    "curl -m 5 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short request timeout option (negative value)",
@@ -96,13 +88,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithRequestTimeout(-5)},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'GET' 'https://localhost/test'",
-				},
-				requestTimeout: 0,
-			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long location option",
@@ -112,14 +99,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithFollowRedirects(), WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --location --request 'GET' 'https://localhost/test'",
-				},
-				useLongForm: true,
-				location:    true,
-			},
-			wantErr: false,
+			want:    "curl --location 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long insecure option",
@@ -129,14 +110,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithInsecure(), WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --insecure --request 'GET' 'https://localhost/test'",
-				},
-				useLongForm: true,
-				insecure:    true,
-			},
-			wantErr: false,
+			want:    "curl --insecure 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long silent option",
@@ -146,14 +121,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithSilent(), WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --silent --request 'GET' 'https://localhost/test'",
-				},
-				useLongForm: true,
-				silent:      true,
-			},
-			wantErr: false,
+			want:    "curl --silent 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long request timeout option (positive value)",
@@ -163,14 +132,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithLongForm(), WithRequestTimeout(5)},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --max-time 5 --request 'GET' 'https://localhost/test'",
-				},
-				useLongForm:    true,
-				requestTimeout: 5,
-			},
-			wantErr: false,
+			want:    "curl --max-time 5 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long request timeout option (negative value)",
@@ -180,14 +143,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithLongForm(), WithRequestTimeout(-5)},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'GET' 'https://localhost/test'",
-				},
-				useLongForm:    true,
-				requestTimeout: 0,
-			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "compression option",
@@ -197,13 +154,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithCompression()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --compressed -X 'GET' 'https://localhost/test'",
-				},
-				compressed: true,
-			},
-			wantErr: false,
+			want:    "curl --compressed 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "default multiline option",
@@ -213,14 +165,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithMultiLine()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'GET' 'https://localhost/test'",
-				},
-				useMultiLine:     true,
-				lineContinuation: lineContinuationDefault,
-			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "windows multiline option",
@@ -230,14 +176,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithWindowsMultiLine()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'GET' 'https://localhost/test'",
-				},
-				useMultiLine:     true,
-				lineContinuation: lineContinuationWindows,
-			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "powershell multiline option",
@@ -247,14 +187,8 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithPowerShellMultiLine()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'GET' 'https://localhost/test'",
-				},
-				useMultiLine:     true,
-				lineContinuation: lineContinuationPowerShell,
-			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "double quotes option",
@@ -264,27 +198,80 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithDoubleQuotes()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X \"GET\" \"https://localhost/test\"",
+			want:    "curl \"https://localhost/test\"",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short form multiple options",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
 				},
-				useDoubleQuotes: true,
+				opts: []Option{WithFollowRedirects(), WithInsecure(), WithSilent()},
 			},
-			wantErr: false,
+			want:    "curl -s -k -L 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "long form multiple options",
+			args: args{
+				r: &http.Request{
+					URL: testUrl,
+				},
+				opts: []Option{WithFollowRedirects(), WithInsecure(), WithSilent(), WithLongForm()},
+			},
+			want:    "curl --silent --insecure --location 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "double quotes option with special characters",
+			args: args{
+				r: &http.Request{
+					URL: specialTestUrl,
+				},
+				opts: []Option{WithDoubleQuotes()},
+			},
+			want:    "curl \"https://localhost/test?q=\\\"hello \\$user\\\"\"",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "kitchen sink (all options enabled)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPut,
+					URL:    specialTestUrl,
+					Host:   "host",
+					Header: http.Header{
+						"Authorization": {"Basic dXNlcjpwYXNz"},
+						"X-Extra":       {"value"},
+					},
+					Body: io.NopCloser(strings.NewReader("data")),
+				},
+				opts: []Option{
+					WithFollowRedirects(),
+					WithCompression(),
+					WithInsecure(),
+					WithSilent(),
+					WithLongForm(),
+					WithRequestTimeout(10),
+					WithDoubleQuotes(),
+				},
+			},
+			want:    "curl --silent --max-time 10 --insecure --compressed --location --user \"user:pass\" --data-raw \"data\" --request \"PUT\" \"https://localhost/test?q=\\\"hello \\$user\\\"\" --header \"Host: host\" --header \"X-Extra: value\"",
+			wantErr: assert.NoError,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := NewFromRequest(tt.args.r, tt.args.opts...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewFromRequest() error = %v, wantErr %v", err, tt.wantErr)
+
+			if !tt.wantErr(t, err, "NewFromRequest() error") {
 				return
 			}
 
-			optUnexported := cmp.AllowUnexported(Command{})
-			if !cmp.Equal(got, tt.want, optUnexported) {
-				t.Errorf("NewFromRequest() got = %v, want = %v, diff = %v", got, tt.want, cmp.Diff(got, tt.want, optUnexported))
-			}
+			assert.Equal(t, tt.want, got.String())
 		})
 	}
 }

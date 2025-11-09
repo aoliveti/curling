@@ -1,26 +1,24 @@
 package curling
 
 import (
-	"github.com/google/go-cmp/cmp"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_NewFromRequest_body(t *testing.T) {
+	t.Parallel()
+
 	testUrl := &url.URL{
 		Scheme: "https",
 		Host:   "localhost",
 		Path:   "test",
 	}
-
 	body := "key=value"
-	r, err := http.NewRequest(http.MethodPost, testUrl.String(), strings.NewReader(body))
-	if err != nil {
-		t.Errorf("new request: %v", err)
-		return
-	}
 
 	type args struct {
 		r    *http.Request
@@ -29,8 +27,8 @@ func Test_NewFromRequest_body(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *Command
-		wantErr bool
+		want    string
+		wantErr assert.ErrorAssertionFunc
 	}{
 		{
 			name: "short form nil body",
@@ -38,14 +36,11 @@ func Test_NewFromRequest_body(t *testing.T) {
 				r: &http.Request{
 					URL:    testUrl,
 					Method: http.MethodPost,
+					Body:   nil,
 				},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'POST' 'https://localhost/test'",
-				},
-			},
-			wantErr: false,
+			want:    "curl -X 'POST' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short form http.NoBody",
@@ -56,25 +51,32 @@ func Test_NewFromRequest_body(t *testing.T) {
 					Body:   http.NoBody,
 				},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'POST' 'https://localhost/test'",
+			want:    "curl -X 'POST' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short form empty string body",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("")),
 				},
 			},
-			wantErr: false,
+			want:    "curl --data-raw '' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "short form body",
 			args: args{
-				r: r,
-			},
-			want: &Command{
-				tokens: []string{
-					"curl -X 'POST' 'https://localhost/test'",
-					"-d 'key=value'",
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(body)),
 				},
 			},
-			wantErr: false,
+			want:    "curl --data-raw 'key=value' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long form nil body",
@@ -82,16 +84,12 @@ func Test_NewFromRequest_body(t *testing.T) {
 				r: &http.Request{
 					URL:    testUrl,
 					Method: http.MethodPost,
+					Body:   nil,
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'POST' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'POST' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long form http.NoBody",
@@ -103,42 +101,125 @@ func Test_NewFromRequest_body(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'POST' 'https://localhost/test'",
-				},
-				useLongForm: true,
-			},
-			wantErr: false,
+			want:    "curl --request 'POST' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 		{
 			name: "long form body",
 			args: args{
-				r:    r,
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(body)),
+				},
 				opts: []Option{WithLongForm()},
 			},
-			want: &Command{
-				tokens: []string{
-					"curl --request 'POST' 'https://localhost/test'",
-					"--data 'key=value'",
+			want:    "curl --data-raw 'key=value' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short form GET (default)",
+			args: args{
+				r: &http.Request{
+					URL:    testUrl,
+					Method: http.MethodGet,
+					Body:   http.NoBody,
 				},
-				useLongForm: true,
 			},
-			wantErr: false,
+			want:    "curl 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short form PUT with body (non-default)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPut,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(body)),
+				},
+			},
+			want:    "curl --data-raw 'key=value' -X 'PUT' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "default method with body (should be POST)",
+			args: args{
+				r: &http.Request{
+					Method: "",
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(body)),
+				},
+			},
+			want:    "curl --data-raw 'key=value' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short form body smaller than limit",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("abc")),
+				},
+				opts: []Option{WithMaxBodySize(10)},
+			},
+			want:    "curl --data-raw 'abc' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short form body larger than limit",
+			args: args{
+				r: &http.Request{
+					Method:        http.MethodPost,
+					URL:           testUrl,
+					Body:          io.NopCloser(strings.NewReader("abcdefghijklmn")),
+					ContentLength: 14,
+				},
+				opts: []Option{WithMaxBodySize(10)},
+			},
+			want:    "curl --data-raw 'abcdefghij... (truncated body, total 14 bytes)' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "long form body larger than limit",
+			args: args{
+				r: &http.Request{
+					Method:        http.MethodPost,
+					URL:           testUrl,
+					Body:          io.NopCloser(strings.NewReader("abcdefghijklmn")),
+					ContentLength: 14,
+				},
+				opts: []Option{WithMaxBodySize(10), WithLongForm()},
+			},
+			want:    "curl --data-raw 'abcdefghij... (truncated body, total 14 bytes)' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short form body larger than limit (unknown length)",
+			args: args{
+				r: &http.Request{
+					Method:        http.MethodPost,
+					URL:           testUrl,
+					Body:          io.NopCloser(strings.NewReader("abcdefghijklmn")),
+					ContentLength: -1,
+				},
+				opts: []Option{WithMaxBodySize(10)},
+			},
+			want:    "curl --data-raw 'abcdefghij... (truncated body)' 'https://localhost/test'",
+			wantErr: assert.NoError,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := NewFromRequest(tt.args.r, tt.args.opts...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewFromRequest() error = %v, wantErr %v", err, tt.wantErr)
+
+			if !tt.wantErr(t, err, "NewFromRequest() error") {
 				return
 			}
 
-			optUnexported := cmp.AllowUnexported(Command{})
-			if !cmp.Equal(got, tt.want, optUnexported) {
-				t.Errorf("NewFromRequest() got = %v, want = %v, diff = %v", got, tt.want, cmp.Diff(got, tt.want, optUnexported))
-			}
+			assert.Equal(t, tt.want, got.String())
 		})
 	}
 }
