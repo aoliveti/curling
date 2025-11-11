@@ -46,8 +46,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	req.Header = make(http.Header)
+	
 	req.SetBasicAuth("user", "pass")
 	req.AddCookie(&http.Cookie{Name: "session", Value: "abc12345"})
 	req.Header.Set("X-Request-ID", "12345")

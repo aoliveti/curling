@@ -92,7 +92,7 @@ func (m *parsedRequest) build(r *http.Request, cfg config) error {
 	// Create the buffer that will hold the body
 	buf := new(bytes.Buffer)
 
-	rr := io.Reader(r.Body)
+	var rr io.Reader = r.Body
 	if cfg.maxBodySize > 0 {
 		// If a limit is set, wrap the original body in a LimitReader.
 		// rr now reads from r.Body but will stop after maxBodySize bytes.
