@@ -1,7 +1,9 @@
 package curling
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,8 +39,8 @@ type parsedRequest struct {
 	// cookies is the formatted string of all cookies (e.g., "k1=v1; k2=v2").
 	cookies string
 
-	// bodyWasTruncated is true if the body exceeded maxBodySize.
-	bodyWasTruncated bool
+	// bodyTruncated is true if the body exceeded maxBodySize.
+	bodyTruncated bool
 	// contentLength holds the original Content-Length header, if present.
 	contentLength int64
 }
@@ -68,6 +70,9 @@ func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
 }
 
 // build preprocesses the *http.Request into the internal parsedRequest.
+// It non-destructively reads (peeks) the request body, sets flags for
+// truncation and data presence, and then restores the body so it can be
+// read again by subsequent handlers.
 func (m *parsedRequest) build(r *http.Request, cfg config) error {
 	m.request = r
 	m.user, m.pass, m.hasAuth = r.BasicAuth()
@@ -90,35 +95,40 @@ func (m *parsedRequest) build(r *http.Request, cfg config) error {
 	}
 
 	// Create the buffer that will hold the body
-	buf := new(bytes.Buffer)
-
-	var rr io.Reader = r.Body
-	if cfg.maxBodySize > 0 {
-		// If a limit is set, wrap the original body in a LimitReader.
-		// rr now reads from r.Body but will stop after maxBodySize bytes.
-		rr = io.LimitReader(r.Body, cfg.maxBodySize)
+	peekSize := cfg.maxBodySize
+	if peekSize <= 0 {
+		peekSize = defaultMaxBodySize
 	}
 
-	bytesRead, err := io.Copy(buf, rr)
-	if err != nil {
+	// Wrap the original body in a bufio.Reader.
+	// This is essential for non-destructive peeking.
+	b := bufio.NewReader(r.Body)
+
+	// Peek(peekSize + 1) is the key to detecting truncation.
+	// We try to read one byte more than the limit.
+	peekBuffer, err := b.Peek(peekSize + 1)
+
+	// Only hard I/O errors are fatal.
+	// We must allow io.EOF (body < peekSize) and
+	// bufio.ErrBufferFull (body > internal buffer).
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
 		return fmt.Errorf("error reading request body: %w", err)
 	}
 
-	// If a limit was set and we read exactly that many bytes,
-	// we must check if the original body still has data.
-	if cfg.maxBodySize > 0 && bytesRead == cfg.maxBodySize {
-		// Try to read one more byte from the original r.Body.
-		// If n > 0, the LimitReader stopped us, so truncation occurred.
-		if n, _ := r.Body.Read(make([]byte, 1)); n > 0 {
-			m.bodyWasTruncated = true
-		}
+	m.body = bytes.NewBuffer(peekBuffer)
+	m.hasData = true
+
+	// Check if truncation occurred.
+	// Truncation is detected if Peek(peekSize + 1) succeeded (err == nil)
+	// or if the body was larger than internal buffer (ErrBufferFull).
+	if err == nil || errors.Is(err, bufio.ErrBufferFull) {
+		m.bodyTruncated = true
+		// Cut the log buffer down to the exact peekSize.
+		m.body.Truncate(peekSize)
 	}
 
-	// Restore the original body
-	r.Body = io.NopCloser(bytes.NewBuffer(buf.Bytes()))
-
-	m.body = buf
-	m.hasData = true
+	// Restore the full request body for subsequent handlers.
+	r.Body = io.NopCloser(b)
 
 	return nil
 }
@@ -208,7 +218,7 @@ func buildData(args []string, cfg config, model parsedRequest) []string {
 	body := model.body.String()
 
 	// Add the marker if the body was truncated
-	if model.bodyWasTruncated {
+	if model.bodyTruncated {
 		if model.contentLength > 0 {
 			body += fmt.Sprintf("... (truncated body, total %d bytes)", model.contentLength)
 		} else {
