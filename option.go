@@ -21,8 +21,7 @@ type config struct {
 	// requestTimeout enables the option -m, --max-time.
 	requestTimeout int
 	// maxBodySize is the maximum number of bytes to read from the request body.
-	// A value of 0 or less means no limit.
-	maxBodySize int64
+	maxBodySize int
 }
 
 // outputStyle groups options related to the command's text formatting.
@@ -130,10 +129,13 @@ func WithRequestTimeout(seconds int) Option {
 
 // WithMaxBodySize limits the request body size (in bytes) to read.
 // This prevents OOM errors on large bodies. If the body is truncated,
-// the output string will be appended with "...[BODY TRUNCATED]".
-// A value of 0 or less means no limit.
-func WithMaxBodySize(bytes int64) Option {
+// the output string will be marked with "... (truncated body)".
+// A value of 0 or less means a default limit (1KB).
+func WithMaxBodySize(bytes int) Option {
 	return func(c *Command) {
+		if bytes <= 0 {
+			bytes = defaultMaxBodySize
+		}
 		c.cfg.maxBodySize = bytes
 	}
 }

@@ -1,6 +1,7 @@
 package curling
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/url"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_NewFromRequest_body(t *testing.T) {
@@ -74,6 +76,19 @@ func Test_NewFromRequest_body(t *testing.T) {
 					URL:    testUrl,
 					Body:   io.NopCloser(strings.NewReader(body)),
 				},
+			},
+			want:    "curl --data-raw 'key=value' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "short form body with fallback body size",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(body)),
+				},
+				opts: []Option{WithMaxBodySize(0)},
 			},
 			want:    "curl --data-raw 'key=value' 'https://localhost/test'",
 			wantErr: assert.NoError,
@@ -220,6 +235,59 @@ func Test_NewFromRequest_body(t *testing.T) {
 			}
 
 			assert.Equal(t, tt.want, got.String())
+		})
+	}
+}
+
+func TestNewFromRequest_BodyRestoration(t *testing.T) {
+	t.Parallel()
+
+	opts := []Option{WithMaxBodySize(10)}
+
+	testUrl := &url.URL{
+		Scheme: "https",
+		Host:   "localhost",
+	}
+
+	tests := []struct {
+		name         string
+		originalBody []byte
+	}{
+		{
+			name:         "body smaller than limit",
+			originalBody: []byte("12345"), // 5 bytes < 10 byte limit
+		},
+		{
+			name:         "body equal to limit",
+			originalBody: []byte("1234567890"), // 10 bytes == 10 byte limit
+		},
+		{
+			name:         "body larger than limit (truncation)",
+			originalBody: []byte("12345678901234"), // 14 bytes > 10 byte limit
+		},
+		{
+			name:         "empty body",
+			originalBody: []byte{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &http.Request{
+				Method: http.MethodPost,
+				URL:    testUrl,
+				Body:   io.NopCloser(bytes.NewReader(tt.originalBody)),
+			}
+
+			_, err := NewFromRequest(r, opts...)
+			require.NoError(t, err, "NewFromRequest should not fail")
+
+			restoredBody, err := io.ReadAll(r.Body)
+			require.NoError(t, err, "Failed to read the restored body")
+
+			assert.Equal(t, tt.originalBody, restoredBody, "Body content was not restored correctly")
 		})
 	}
 }
