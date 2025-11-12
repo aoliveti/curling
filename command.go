@@ -96,32 +96,28 @@ func (m *parsedRequest) build(r *http.Request, cfg config) error {
 
 	// Create the buffer that will hold the body
 	peekSize := cfg.maxBodySize
-	if peekSize <= 0 {
-		peekSize = defaultMaxBodySize
-	}
 
 	// Wrap the original body in a bufio.Reader.
 	// This is essential for non-destructive peeking.
-	b := bufio.NewReader(r.Body)
+	b := bufio.NewReaderSize(r.Body, peekSize+1)
 
 	// Peek(peekSize + 1) is the key to detecting truncation.
 	// We try to read one byte more than the limit.
 	peekBuffer, err := b.Peek(peekSize + 1)
 
 	// Only hard I/O errors are fatal.
-	// We must allow io.EOF (body < peekSize) and
-	// bufio.ErrBufferFull (body > internal buffer).
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
+	// We must allow io.EOF (body < peekSize)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("error reading request body: %w", err)
 	}
 
 	m.body = bytes.NewBuffer(peekBuffer)
 	m.hasData = true
 
-	// Check if truncation occurred.
-	// Truncation is detected if Peek(peekSize + 1) succeeded (err == nil)
-	// or if the body was larger than internal buffer (ErrBufferFull).
-	if err == nil || errors.Is(err, bufio.ErrBufferFull) {
+	// Check for truncation.
+	// We peeked one byte past the limit (peekSize + 1).
+	// If the error is not EOF, it means the body is longer than peekSize.
+	if !errors.Is(err, io.EOF) {
 		m.bodyTruncated = true
 		// Cut the log buffer down to the exact peekSize.
 		m.body.Truncate(peekSize)

@@ -81,6 +81,19 @@ func Test_NewFromRequest_body(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
+			name: "short form body with fallback body size",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(body)),
+				},
+				opts: []Option{WithMaxBodySize(0)},
+			},
+			want:    "curl --data-raw 'key=value' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
 			name: "long form nil body",
 			args: args{
 				r: &http.Request{
