@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,6 +45,8 @@ type requestData struct {
 	// cookies is the formatted string of all cookies (e.g., "k1=v1; k2=v2").
 	cookies string
 
+	uri *url.URL
+
 	// bodyTruncated is true if the body exceeded maxBodySize.
 	bodyTruncated bool
 	// contentLength holds the original Content-Length header, if present.
@@ -77,23 +80,52 @@ func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
 // load extracts relevant data from the *http.Request and populates the internal model.
 // It performs a non-destructive read (peek) of the body and restores it,
 // ensuring the request remains valid for subsequent handlers.
-func (m *requestData) load(r *http.Request, cfg config) error {
-	m.request = r
-	m.user, m.pass, m.hasAuth = r.BasicAuth()
+func (d *requestData) load(r *http.Request, cfg config) error {
+	d.request = r
+	d.user, d.pass, d.hasAuth = r.BasicAuth()
 	// Store the original content length
-	m.contentLength = r.ContentLength
+	d.contentLength = r.ContentLength
 
 	// Pre-parse cookies
 	cookies := r.Cookies()
 	if len(cookies) > 0 {
-		m.hasCookies = true
+		d.hasCookies = true
 		var cookieParts []string
 		for _, cookie := range cookies {
 			cookieParts = append(cookieParts, cookie.String())
 		}
-		m.cookies = strings.Join(cookieParts, "; ")
+		d.cookies = strings.Join(cookieParts, "; ")
 	}
 
+	// We create a shallow copy of the URL structure.
+	// This allows us to modify the Scheme/Host in our local copy (d.uri)
+	// without mutating the original URL which might be shared.
+	u := *r.URL
+	d.uri = &u
+
+	// In a server (middleware) context, r.URL.Scheme and r.URL.Host are often missing.
+	if d.uri.Scheme == "" || d.uri.Host == "" {
+		d.uri.Scheme = "http"
+
+		// Check Proxy Headers (if trusted)
+		if cfg.flags.trustProxy {
+			if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+				d.uri.Scheme = proto
+			}
+		}
+
+		// TLS check overrides "http", but usually we respect X-Forwarded-Proto if present
+		if d.uri.Scheme == "http" && r.TLS != nil {
+			d.uri.Scheme = "https"
+		}
+
+		// If URL.Host is empty, fallback to the Request.Host (header value).
+		if d.uri.Host == "" && r.Host != "" {
+			d.uri.Host = r.Host
+		}
+	}
+
+	// If there is no body, we're done.
 	if r.Body == nil || r.Body == http.NoBody {
 		return nil
 	}
@@ -115,16 +147,16 @@ func (m *requestData) load(r *http.Request, cfg config) error {
 		return fmt.Errorf("error reading request body: %w", err)
 	}
 
-	m.body = bytes.NewBuffer(peekBuffer)
-	m.hasData = true
+	d.body = bytes.NewBuffer(peekBuffer)
+	d.hasData = true
 
 	// Check for truncation.
 	// We peeked one byte past the limit (peekSize + 1).
 	// If the error is not EOF, it means the body is longer than peekSize.
 	if !errors.Is(err, io.EOF) {
-		m.bodyTruncated = true
+		d.bodyTruncated = true
 		// Cut the log buffer down to the exact peekSize.
-		m.body.Truncate(peekSize)
+		d.body.Truncate(peekSize)
 	}
 
 	// Restore the full request body for subsequent handlers.
@@ -188,12 +220,12 @@ func buildOptions(args []string, cfg config) []string {
 }
 
 // buildAuth adds the -u/--user flag and handles the Authorization header.
-func buildAuth(args []string, cfg config, model requestData, handledHeaders map[string]bool) []string {
-	if !model.hasAuth {
+func buildAuth(args []string, cfg config, data requestData, handledHeaders map[string]bool) []string {
+	if !data.hasAuth {
 		return args
 	}
 
-	authStr := fmt.Sprintf("%s:%s", model.user, model.pass)
+	authStr := fmt.Sprintf("%s:%s", data.user, data.pass)
 	args = append(args, optionForm(cfg.style, "-u", "--user"), escape(cfg.style, authStr))
 	handledHeaders["Authorization"] = true
 
@@ -201,30 +233,30 @@ func buildAuth(args []string, cfg config, model requestData, handledHeaders map[
 }
 
 // buildCookies adds the -b/--cookie flag and handles the Cookie header.
-func buildCookies(args []string, cfg config, model requestData, handledHeaders map[string]bool) []string {
-	if !model.hasCookies {
+func buildCookies(args []string, cfg config, data requestData, handledHeaders map[string]bool) []string {
+	if !data.hasCookies {
 		return args
 	}
 
-	args = append(args, optionForm(cfg.style, "-b", "--cookie"), escape(cfg.style, model.cookies))
+	args = append(args, optionForm(cfg.style, "-b", "--cookie"), escape(cfg.style, data.cookies))
 	handledHeaders["Cookie"] = true
 
 	return args
 }
 
 // buildData adds the --data-raw flag if data exists.
-func buildData(args []string, cfg config, model requestData) []string {
+func buildData(args []string, cfg config, data requestData) []string {
 	// We only add the flag if a body was present (even if empty).
-	if model.body == nil {
+	if data.body == nil {
 		return args
 	}
 
-	body := model.body.String()
+	body := data.body.String()
 
 	// Add the marker if the body was truncated
-	if model.bodyTruncated {
-		if model.contentLength > 0 {
-			body += fmt.Sprintf("... (truncated body, total %d bytes)", model.contentLength)
+	if data.bodyTruncated {
+		if data.contentLength > 0 {
+			body += fmt.Sprintf("... (truncated body, total %d bytes)", data.contentLength)
 		} else {
 			body += "... (truncated body)"
 		}
@@ -234,18 +266,18 @@ func buildData(args []string, cfg config, model requestData) []string {
 }
 
 // buildMethod adds the -X flag if it is not a cURL default.
-func buildMethod(args []string, cfg config, model requestData) []string {
-	method := model.request.Method
+func buildMethod(args []string, cfg config, data requestData) []string {
+	method := data.request.Method
 	if method == "" {
-		if model.hasData {
+		if data.hasData {
 			method = http.MethodPost
 		} else {
 			method = http.MethodGet
 		}
 	}
 
-	isGetDefault := method == http.MethodGet && !model.hasData
-	isPostDefault := method == http.MethodPost && model.hasData
+	isGetDefault := method == http.MethodGet && !data.hasData
+	isPostDefault := method == http.MethodPost && data.hasData
 
 	if !isGetDefault && !isPostDefault {
 		args = append(args, optionForm(cfg.style, "-X", "--request"), escape(cfg.style, method))
@@ -255,17 +287,19 @@ func buildMethod(args []string, cfg config, model requestData) []string {
 }
 
 // buildURL escapes and adds the URL to the end of the main args.
-func buildURL(args []string, cfg config, model requestData) []string {
-	return append(args, escape(cfg.style, model.request.URL.String()))
+func buildURL(args []string, cfg config, data requestData) []string {
+	return append(args, escape(cfg.style, data.uri.String()))
 }
 
 // buildHeaders builds all non-handled HTTP headers.
-func buildHeaders(cfg config, model requestData, handledHeaders map[string]bool) []string {
-	r := model.request
+func buildHeaders(cfg config, data requestData, handledHeaders map[string]bool) []string {
+	r := data.request
 	if len(r.Header) == 0 && r.Host == "" {
 		return nil
 	}
 
+	// The Host header is usually promoted to the Request.Host field
+	// and removed from the Header map. We start with that value.
 	host := r.Host
 	var headers []string
 	var headerTokens []string
@@ -286,7 +320,9 @@ func buildHeaders(cfg config, model requestData, handledHeaders map[string]bool)
 		headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, strings.Join(values, ", ")))
 	}
 
-	if host != "" {
+	// Host: We only add it explicitly if it differs from the host in the calculated URL.
+	// This avoids redundant "-H 'Host: ...'" flags when cURL would infer it automatically.
+	if host != "" && data.uri.Host != host {
 		headers = append(headers, fmt.Sprintf("Host: %s", host))
 	}
 
