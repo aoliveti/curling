@@ -25,12 +25,12 @@ type Command struct {
 	// cfg holds all user-configurable settings.
 	cfg config
 
-	// model is the pre-processed request data used by the builders.
-	model parsedRequest
+	// data contains the details extracted from the *http.Request.
+	data requestData
 }
 
-// parsedRequest holds pre-calculated data from the *http.Request.
-type parsedRequest struct {
+// requestData holds pre-calculated data from the *http.Request.
+type requestData struct {
 	request *http.Request
 
 	hasAuth bool
@@ -65,20 +65,19 @@ func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
 		return nil, fmt.Errorf("request url is nil")
 	}
 
-	if err := c.model.build(r, c.cfg); err != nil {
+	if err := c.data.load(r, c.cfg); err != nil {
 		return nil, err
 	}
 
-	c.construct()
+	c.compile()
 
 	return &c, nil
 }
 
-// build preprocesses the *http.Request into the internal parsedRequest.
-// It non-destructively reads (peeks) the request body, sets flags for
-// truncation and data presence, and then restores the body so it can be
-// read again by subsequent handlers.
-func (m *parsedRequest) build(r *http.Request, cfg config) error {
+// load extracts relevant data from the *http.Request and populates the internal model.
+// It performs a non-destructive read (peek) of the body and restores it,
+// ensuring the request remains valid for subsequent handlers.
+func (m *requestData) load(r *http.Request, cfg config) error {
 	m.request = r
 	m.user, m.pass, m.hasAuth = r.BasicAuth()
 	// Store the original content length
@@ -137,21 +136,22 @@ func (m *parsedRequest) build(r *http.Request, cfg config) error {
 	return nil
 }
 
-// construct is the internal orchestrator.
-// It runs all the small autonomous builder functions in order.
-func (c *Command) construct() {
+// compile assembles the final cURL command tokens.
+// It executes the specific builder functions (headers, auth, body, etc.)
+// and aggregates their output into the final command structure.
+func (c *Command) compile() {
 	// handledHeaders tracks headers handled by builders (e.g., Auth)
 	handledHeaders := make(map[string]bool)
 
 	commandParts := []string{"curl"}
 	commandParts = buildOptions(commandParts, c.cfg)
-	commandParts = buildAuth(commandParts, c.cfg, c.model, handledHeaders)
-	commandParts = buildCookies(commandParts, c.cfg, c.model, handledHeaders)
-	commandParts = buildData(commandParts, c.cfg, c.model)
-	commandParts = buildMethod(commandParts, c.cfg, c.model)
-	commandParts = buildURL(commandParts, c.cfg, c.model)
+	commandParts = buildAuth(commandParts, c.cfg, c.data, handledHeaders)
+	commandParts = buildCookies(commandParts, c.cfg, c.data, handledHeaders)
+	commandParts = buildData(commandParts, c.cfg, c.data)
+	commandParts = buildMethod(commandParts, c.cfg, c.data)
+	commandParts = buildURL(commandParts, c.cfg, c.data)
 
-	headerParts := buildHeaders(c.cfg, c.model, handledHeaders)
+	headerParts := buildHeaders(c.cfg, c.data, handledHeaders)
 
 	c.tokens = assembleTokens(commandParts, headerParts)
 }
@@ -187,8 +187,8 @@ func buildOptions(args []string, cfg config) []string {
 	return args
 }
 
-// buildAuth adds the -u/--user flag and handle the Authorization header.
-func buildAuth(args []string, cfg config, model parsedRequest, handledHeaders map[string]bool) []string {
+// buildAuth adds the -u/--user flag and handles the Authorization header.
+func buildAuth(args []string, cfg config, model requestData, handledHeaders map[string]bool) []string {
 	if !model.hasAuth {
 		return args
 	}
@@ -200,8 +200,8 @@ func buildAuth(args []string, cfg config, model parsedRequest, handledHeaders ma
 	return args
 }
 
-// buildCookies adds the -b/--cookie flag and handle the Cookie header.
-func buildCookies(args []string, cfg config, model parsedRequest, handledHeaders map[string]bool) []string {
+// buildCookies adds the -b/--cookie flag and handles the Cookie header.
+func buildCookies(args []string, cfg config, model requestData, handledHeaders map[string]bool) []string {
 	if !model.hasCookies {
 		return args
 	}
@@ -213,7 +213,7 @@ func buildCookies(args []string, cfg config, model parsedRequest, handledHeaders
 }
 
 // buildData adds the --data-raw flag if data exists.
-func buildData(args []string, cfg config, model parsedRequest) []string {
+func buildData(args []string, cfg config, model requestData) []string {
 	// We only add the flag if a body was present (even if empty).
 	if model.body == nil {
 		return args
@@ -234,7 +234,7 @@ func buildData(args []string, cfg config, model parsedRequest) []string {
 }
 
 // buildMethod adds the -X flag if it is not a cURL default.
-func buildMethod(args []string, cfg config, model parsedRequest) []string {
+func buildMethod(args []string, cfg config, model requestData) []string {
 	method := model.request.Method
 	if method == "" {
 		if model.hasData {
@@ -255,12 +255,12 @@ func buildMethod(args []string, cfg config, model parsedRequest) []string {
 }
 
 // buildURL escapes and adds the URL to the end of the main args.
-func buildURL(args []string, cfg config, model parsedRequest) []string {
+func buildURL(args []string, cfg config, model requestData) []string {
 	return append(args, escape(cfg.style, model.request.URL.String()))
 }
 
 // buildHeaders builds all non-handled HTTP headers.
-func buildHeaders(cfg config, model parsedRequest, handledHeaders map[string]bool) []string {
+func buildHeaders(cfg config, model requestData, handledHeaders map[string]bool) []string {
 	r := model.request
 	if len(r.Header) == 0 && r.Host == "" {
 		return nil
