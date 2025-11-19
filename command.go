@@ -12,6 +12,11 @@ import (
 	"strings"
 )
 
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
 // A Command represents a cURL command.
 type Command struct {
 	// tokens holds the complete lines of the command.
@@ -124,7 +129,10 @@ func (m *parsedRequest) build(r *http.Request, cfg config) error {
 	}
 
 	// Restore the full request body for subsequent handlers.
-	r.Body = io.NopCloser(b)
+	r.Body = &readCloser{
+		Reader: b,
+		Closer: r.Body,
+	}
 
 	return nil
 }
