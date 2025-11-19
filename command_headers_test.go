@@ -142,10 +142,10 @@ func Test_NewFromRequest_headers(t *testing.T) {
 				r: &http.Request{
 					Method: http.MethodGet,
 					URL:    testUrl,
-					Host:   "localhost",
+					Host:   "test.example.com",
 				},
 			},
-			want:    "curl 'https://localhost/test' -H 'Host: localhost'",
+			want:    "curl 'https://localhost/test' -H 'Host: test.example.com'",
 			wantErr: assert.NoError,
 		},
 		{

@@ -38,6 +38,8 @@ type curlFlags struct {
 	compressed bool
 	insecure   bool
 	silent     bool
+	// trustProxy enables reading X-Forwarded-* headers to determine the original scheme/host.
+	trustProxy bool
 }
 
 // Option defines a functional option for configuring a [Command].
@@ -137,5 +139,18 @@ func WithMaxBodySize(bytes int) Option {
 			bytes = defaultMaxBodySize
 		}
 		c.cfg.maxBodySize = bytes
+	}
+}
+
+// WithTrustProxy enables the evaluation of "X-Forwarded-Proto" headers.
+//
+// This is useful when the library is used in a middleware behind a Load Balancer
+// or Reverse Proxy that terminates SSL. Without this, the cURL command might
+// generated as "http://" instead of "https://".
+//
+// SECURITY NOTE: Only use this if you trust the upstream proxy.
+func WithTrustProxy() Option {
+	return func(c *Command) {
+		c.cfg.flags.trustProxy = true
 	}
 }
