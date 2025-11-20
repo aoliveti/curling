@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -58,7 +59,6 @@ func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
 	var c Command
 
 	// Set default config values
-	c.cfg.maskedHeaders = make(map[string]struct{})
 	c.cfg.maxBodySize = defaultMaxBodySize
 
 	for _, opt := range opts {
@@ -91,6 +91,12 @@ func (d *requestData) load(r *http.Request, cfg config) error {
 	cookies := r.Cookies()
 	if len(cookies) > 0 {
 		d.hasCookies = true
+
+		// Sort cookies by name for deterministic output.
+		sort.Slice(cookies, func(i, j int) bool {
+			return cookies[i].Name < cookies[j].Name
+		})
+
 		var cookieParts []string
 		for _, cookie := range cookies {
 			cookieParts = append(cookieParts, cookie.String())
@@ -111,6 +117,11 @@ func (d *requestData) load(r *http.Request, cfg config) error {
 		// Check Proxy Headers (if trusted)
 		if cfg.flags.trustProxy {
 			if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+				// Handle multiple hops (e.g. "https, http").
+				// We only care about the client's original protocol (the first one).
+				if comma := strings.Index(proto, ","); comma != -1 {
+					proto = strings.TrimSpace(proto[:comma])
+				}
 				d.uri.Scheme = proto
 			}
 		}
@@ -177,7 +188,7 @@ func (c *Command) compile() {
 	handledHeaders := make(map[string]bool)
 
 	commandParts := []string{"curl"}
-	commandParts = buildOptions(commandParts, c.cfg)
+	commandParts = buildOptions(commandParts, c.cfg, c.data)
 	commandParts = buildAuth(commandParts, c.cfg, c.data, handledHeaders)
 	commandParts = buildCookies(commandParts, c.cfg, c.data, handledHeaders)
 	commandParts = buildData(commandParts, c.cfg, c.data)
@@ -201,7 +212,7 @@ func (c *Command) String() string {
 }
 
 // buildOptions adds basic curl flags (-s, -k, -L, -m, --compressed)
-func buildOptions(args []string, cfg config) []string {
+func buildOptions(args []string, cfg config, data requestData) []string {
 	if cfg.flags.silent {
 		args = append(args, optionForm(cfg.style, "-s", "--silent"))
 	}
@@ -217,6 +228,16 @@ func buildOptions(args []string, cfg config) []string {
 	if cfg.flags.location {
 		args = append(args, optionForm(cfg.style, "-L", "--location"))
 	}
+
+	// Smart Globbing:
+	// If the URL contains characters that cURL interprets as globbing ranges ([] or {}),
+	// we automatically disable globbing to treat the URL literally.
+	// This prevents syntax errors with IPv6 addresses (e.g., [::1]) or query parameters
+	// containing brackets (e.g., filters[id]=1).
+	if strings.ContainsAny(data.uri.String(), "[]{}") {
+		args = append(args, optionForm(cfg.style, "-g", "--globoff"))
+	}
+
 	return args
 }
 
@@ -315,13 +336,23 @@ func buildHeaders(cfg config, data requestData, handledHeaders map[string]bool) 
 	for key, values := range r.Header {
 		canonicalKey := http.CanonicalHeaderKey(key)
 
+		// We remove Content-Length because cURL calculates it automatically based on the body data.
+		// Keeping the original header is dangerous if we truncated the body (mismatch)
+		if canonicalKey == "Content-Length" {
+			continue
+		}
+
+		// We skip headers that builders already handled (Auth, Cookies).
 		if handledHeaders[canonicalKey] {
 			continue
 		}
 
+		// Handle Host header extraction separately.
 		if canonicalKey == "Host" {
-			if host == "" {
-				host = strings.Join(values, ", ")
+			if host == "" && len(values) > 0 {
+				// RFC 7230: A client MUST send a Host header field in all HTTP/1.1 request messages.
+				// We take the first value as the authoritative host for comparison.
+				host = values[0]
 			}
 			continue
 		}
@@ -330,13 +361,8 @@ func buildHeaders(cfg config, data requestData, handledHeaders map[string]bool) 
 		// This ensures that headers with multiple values are represented as multiple -H flags,
 		// avoiding data corruption if values contain commas.
 		for _, value := range values {
-			// Check if the header is configured to be masked.
-			// If so, replace the actual value with a placeholder.
-			if isMasked(cfg, canonicalKey) {
-				value = "*****"
-			}
-
-			headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, value))
+			sv := sanitizeHeaderValue(cfg, canonicalKey, value)
+			headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, sv))
 		}
 	}
 
@@ -370,6 +396,22 @@ func optionForm(style outputStyle, short, long string) string {
 		return long
 	}
 	return short
+}
+
+// sanitizeHeaderValue resolves the final string representation of a header value by evaluating configuration rules.
+// It first checks if an environment variable substitution is defined, which takes the highest priority.
+// If no substitution is found, it checks if the header is configured to be masked and returns a redacted placeholder.
+// If neither condition is met, it returns the original header value unchanged.
+func sanitizeHeaderValue(cfg config, key, value string) string {
+	if envVar, ok := cfg.envSubstitutions[key]; ok {
+		return envVar
+	}
+
+	if isMasked(cfg, key) {
+		return "*****"
+	}
+
+	return value
 }
 
 // isMasked checks if the given header key is in the maskedHeaders map.

@@ -13,12 +13,12 @@
 
 ## Features
 
-* Converts Basic Auth to `-u` and Cookies to `-b`.
-* Rebuilds absolute URLs for server-side requests (middleware), handling missing schemes/hosts and proxy headers.
-* Prioritizes `r.Host` over the `Host:` header, mimicking Go's client.
-* Truncates request bodies by default (1KB) to prevent OOM errors.
-* Supports masking specific headers (e.g., API keys, Authorization tokens) to prevent sensitive data leaks in logs.
-* Supports multi-line output, long-form options, and quote styles.
+* **Smart URL Handling:** Rebuilds absolute URLs for server-side requests (handling multi-hop proxies) and auto-disables globbing (`-g`) for IPv6 or array parameters.
+* **RFC Compliance:** Handles multi-value headers as separate flags and strictly prioritizes `r.Host` (RFC 7230).
+* **Safety:** Automatically removes `Content-Length` to prevent cURL errors and truncates request bodies (1KB default) to avoid OOM.
+* **Privacy & Security:** Supports masking headers (`*****`) or substituting them with environment variables (`$VAR`).
+* **Deterministic Output:** Sorts headers and cookies alphabetically for consistent testing/logging.
+* **Formatting:** Converts Basic Auth to `-u`, Cookies to `-b`, and supports multi-line output/quoting styles.
 
 ## Install
 
@@ -82,29 +82,40 @@ cmd, _ := curling.NewFromRequest(req, curling.WithMaxBodySize(2*1024*1024))
 
 ### Server-side URL reconstruction
 
-When used in middleware (server-side), `http.Request` often lacks the `Scheme` and `Host`. The library attempts to reconstruct the full absolute URL by checking (in order):
+When used in middleware (server-side), `http.Request` often lacks the `Scheme` and `Host`. The library reconstructs the absolute URL using the following logic:
 
-1. **Proxy Header:** `X-Forwarded-Proto` (only if `WithTrustProxy()` is enabled).
-2. **TLS State:** Checks if the connection is secure.
-3. **Host:** Uses `r.Host` (or `Host` header) and falls back to `r.URL.Host`.
+* **Scheme:** Defaults to `http`.
+    * If `WithTrustProxy()` is enabled, `X-Forwarded-Proto` takes precedence (supports multi-hop).
+    * Otherwise, it detects `https` if the connection state (`r.TLS`) is secure.
+* **Host:** Prioritizes `r.Host` (the `Host` header), falling back to `r.URL.Host`.
 
-### Options
+### Environment variable substitution
 
-| Option                                 | Description                                                                                                            |
-|----------------------------------------|------------------------------------------------------------------------------------------------------------------------|
-| `WithLongForm()`                       | Use long-form cURL options (e.g., `--request`)                                                                         |
-| `WithFollowRedirects()`                | Set the flag -L, --location                                                                                            |
-| `WithInsecure()`                       | Set the flag -k, --insecure                                                                                            |
-| `WithTrustProxy()`                     | Trust `X-Forwarded-Proto` for URL scheme (http/https) reconstruction                                                   |
-| `WithSilent()`                         | Set the flag -s, --silent                                                                                              |
-| `WithCompression()`                    | Set the flag --compressed                                                                                              |
-| `WithMultiLine()`                      | Use multi-line output (Unix)                                                                                           |
-| `WithWindowsMultiLine()`               | Use multi-line output (Windows CMD)                                                                                    |
-| `WithPowerShellMultiLine()`            | Use multi-line output (PowerShell)                                                                                     |
-| `WithDoubleQuotes()`                   | Use double quotes for escaping                                                                                         |
-| `WithRequestTimeout(seconds int)`      | Set the flag -m, --max-time                                                                                            |
-| `WithMaskedHeaders(headers ...string)` | Mask specific headers (values replaced with `*****`).<br/>Handles `-u` password redaction if `Authorization` is masked |
-| `WithMaxBodySize(bytes int)`           | Override the default 1KB body read limit                                                                               |
+Replace sensitive or dynamic header values with shell environment variables for documentation-friendly output:
+
+```go
+cmd, _ := curling.NewFromRequest(req, curling.WithEnvVar("Authorization", "$API_TOKEN"))
+// Output: curl ... -H 'Authorization: $API_TOKEN'
+```
+
+## Options
+
+| Option                                   | Description                                                                                                            |
+|------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `WithLongForm()`                         | Use long-form cURL options (e.g., `--request`)                                                                         |
+| `WithFollowRedirects()`                  | Set the flag -L, --location                                                                                            |
+| `WithInsecure()`                         | Set the flag -k, --insecure                                                                                            |
+| `WithTrustProxy()`                       | Trust `X-Forwarded-Proto` for URL scheme reconstruction                                                                |
+| `WithSilent()`                           | Set the flag -s, --silent                                                                                              |
+| `WithCompression()`                      | Set the flag --compressed                                                                                              |
+| `WithMultiLine()`                        | Use multi-line output (Unix)                                                                                           |
+| `WithWindowsMultiLine()`                 | Use multi-line output (Windows CMD)                                                                                    |
+| `WithPowerShellMultiLine()`              | Use multi-line output (PowerShell)                                                                                     |
+| `WithDoubleQuotes()`                     | Use double quotes for escaping                                                                                         |
+| `WithRequestTimeout(seconds int)`        | Set the flag -m, --max-time                                                                                            |
+| `WithMaskedHeaders(headers ...string)`   | Mask specific headers (`*****`). Handles `-u` password redaction if `Authorization` is masked                          |
+| `WithEnvVar(header, variable string)`    | Replace a header value with an environment variable placeholder (e.g., `$TOKEN`). Priority over masking                |
+| `WithMaxBodySize(bytes int)`             | Override the default 1KB body read limit                                                                               |
 
 ## License
 

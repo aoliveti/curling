@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -66,6 +67,19 @@ func Test_NewFromRequest_body(t *testing.T) {
 				},
 			},
 			want:    "curl --data-raw '' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "body with Content-Length header",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(body)),
+					Header: http.Header{"Content-Length": {strconv.Itoa(len(body))}},
+				},
+			},
+			want:    "curl --data-raw 'key=value' 'https://localhost/test'",
 			wantErr: assert.NoError,
 		},
 		{
