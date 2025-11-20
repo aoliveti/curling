@@ -59,7 +59,6 @@ func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
 	var c Command
 
 	// Set default config values
-	c.cfg.maskedHeaders = make(map[string]struct{})
 	c.cfg.maxBodySize = defaultMaxBodySize
 
 	for _, opt := range opts {
@@ -362,13 +361,8 @@ func buildHeaders(cfg config, data requestData, handledHeaders map[string]bool) 
 		// This ensures that headers with multiple values are represented as multiple -H flags,
 		// avoiding data corruption if values contain commas.
 		for _, value := range values {
-			// Check if the header is configured to be masked.
-			// If so, replace the actual value with a placeholder.
-			if isMasked(cfg, canonicalKey) {
-				value = "*****"
-			}
-
-			headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, value))
+			sv := sanitizeHeaderValue(cfg, canonicalKey, value)
+			headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, sv))
 		}
 	}
 
@@ -402,6 +396,22 @@ func optionForm(style outputStyle, short, long string) string {
 		return long
 	}
 	return short
+}
+
+// sanitizeHeaderValue resolves the final string representation of a header value by evaluating configuration rules.
+// It first checks if an environment variable substitution is defined, which takes the highest priority.
+// If no substitution is found, it checks if the header is configured to be masked and returns a redacted placeholder.
+// If neither condition is met, it returns the original header value unchanged.
+func sanitizeHeaderValue(cfg config, key, value string) string {
+	if envVar, ok := cfg.envSubstitutions[key]; ok {
+		return envVar
+	}
+
+	if isMasked(cfg, key) {
+		return "*****"
+	}
+
+	return value
 }
 
 // isMasked checks if the given header key is in the maskedHeaders map.

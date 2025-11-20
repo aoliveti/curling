@@ -39,6 +39,8 @@ type config struct {
 	maxBodySize int
 	// maskedHeaders holds the list of headers to be masked in the output.
 	maskedHeaders map[string]struct{}
+	// envSubstitutions maps header keys to environment variable names.
+	envSubstitutions map[string]string
 }
 
 // outputStyle groups options related to the command's text formatting.
@@ -184,8 +186,25 @@ func WithTrustProxy() Option {
 // This option is case-insensitive.
 func WithMaskedHeaders(headers ...string) Option {
 	return func(c *Command) {
+		if c.cfg.maskedHeaders == nil {
+			c.cfg.maskedHeaders = make(map[string]struct{})
+		}
+
 		for _, h := range headers {
 			c.cfg.maskedHeaders[http.CanonicalHeaderKey(h)] = struct{}{}
 		}
+	}
+}
+
+// WithEnvVar replaces the value of a specific header with an environment variable placeholder
+// in the generated command.
+// Priority: This option takes precedence over WithMaskedHeaders.
+func WithEnvVar(header, variableName string) Option {
+	return func(c *Command) {
+		if c.cfg.envSubstitutions == nil {
+			c.cfg.envSubstitutions = make(map[string]string)
+		}
+
+		c.cfg.envSubstitutions[http.CanonicalHeaderKey(header)] = variableName
 	}
 }

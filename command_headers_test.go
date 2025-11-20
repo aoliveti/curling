@@ -258,7 +258,7 @@ func Test_NewFromRequest_headers(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
-			name: "should mask headers",
+			name: "should mask headers and basic auth",
 			args: args{
 				r: func() *http.Request {
 					r := &http.Request{
@@ -267,13 +267,50 @@ func Test_NewFromRequest_headers(t *testing.T) {
 						Header: http.Header{},
 					}
 					r.SetBasicAuth("user", "pass")
-					r.Header.Set("X-Api-Key", "api-kei")
-					r.Header.Set("X-User-Agent", "user-agent")
+					r.Header.Set("X-Api-Key", "secret-key")
+					r.Header.Set("X-Public", "public-val")
 					return r
 				}(),
 				opts: []Option{WithMaskedHeaders("Authorization", "X-Api-Key")},
 			},
-			want:    "curl -u 'user:*****' 'https://localhost/test' -H 'X-Api-Key: *****' -H 'X-User-Agent: user-agent'",
+			want:    "curl -u 'user:*****' 'https://localhost/test' -H 'X-Api-Key: *****' -H 'X-Public: public-val'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "env var substitution",
+			args: args{
+				r: func() *http.Request {
+					r := &http.Request{
+						Method: http.MethodGet,
+						URL:    testUrl,
+						Header: http.Header{},
+					}
+					r.Header.Set("Authorization", "Bearer token")
+					return r
+				}(),
+				opts: []Option{WithEnvVar("Authorization", "$AUTH_TOKEN")},
+			},
+			want:    "curl 'https://localhost/test' -H 'Authorization: $AUTH_TOKEN'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "env var priority over masking",
+			args: args{
+				r: func() *http.Request {
+					r := &http.Request{
+						Method: http.MethodGet,
+						URL:    testUrl,
+						Header: http.Header{},
+					}
+					r.Header.Set("X-Secret", "value")
+					return r
+				}(),
+				opts: []Option{
+					WithMaskedHeaders("X-Secret"),
+					WithEnvVar("X-Secret", "$SECRET_VAR"),
+				},
+			},
+			want:    "curl 'https://localhost/test' -H 'X-Secret: $SECRET_VAR'",
 			wantErr: assert.NoError,
 		},
 	}
