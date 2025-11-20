@@ -223,7 +223,7 @@ func Test_NewFromRequest_headers(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
-			name: "short form multiple cookies",
+			name: "short form multiple ordered cookies",
 			args: args{
 				r: func() *http.Request {
 					r := &http.Request{
@@ -231,12 +231,13 @@ func Test_NewFromRequest_headers(t *testing.T) {
 						URL:    testUrl,
 						Header: http.Header{},
 					}
-					r.AddCookie(&http.Cookie{Name: "c1", Value: "v1"})
-					r.AddCookie(&http.Cookie{Name: "c2", Value: "v2"})
+					r.AddCookie(&http.Cookie{Name: "a", Value: "value"})
+					r.AddCookie(&http.Cookie{Name: "b", Value: "value"})
+					r.AddCookie(&http.Cookie{Name: "c", Value: "value"})
 					return r
 				}(),
 			},
-			want:    "curl -b 'c1=v1; c2=v2' 'https://localhost/test'",
+			want:    "curl -b 'a=value; b=value; c=value' 'https://localhost/test'",
 			wantErr: assert.NoError,
 		},
 		{

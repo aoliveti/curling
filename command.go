@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -91,6 +92,12 @@ func (d *requestData) load(r *http.Request, cfg config) error {
 	cookies := r.Cookies()
 	if len(cookies) > 0 {
 		d.hasCookies = true
+
+		// Sort cookies by name for deterministic output.
+		sort.Slice(cookies, func(i, j int) bool {
+			return cookies[i].Name < cookies[j].Name
+		})
+
 		var cookieParts []string
 		for _, cookie := range cookies {
 			cookieParts = append(cookieParts, cookie.String())
@@ -315,13 +322,23 @@ func buildHeaders(cfg config, data requestData, handledHeaders map[string]bool) 
 	for key, values := range r.Header {
 		canonicalKey := http.CanonicalHeaderKey(key)
 
+		// We remove Content-Length because cURL calculates it automatically based on the body data.
+		// Keeping the original header is dangerous if we truncated the body (mismatch)
+		if canonicalKey == "Content-Length" {
+			continue
+		}
+
+		// We skip headers that builders already handled (Auth, Cookies).
 		if handledHeaders[canonicalKey] {
 			continue
 		}
 
+		// Handle Host header extraction separately.
 		if canonicalKey == "Host" {
-			if host == "" {
-				host = strings.Join(values, ", ")
+			if host == "" && len(values) > 0 {
+				// RFC 7230: A client MUST send a Host header field in all HTTP/1.1 request messages.
+				// We take the first value as the authoritative host for comparison.
+				host = values[0]
 			}
 			continue
 		}
