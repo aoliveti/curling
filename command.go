@@ -58,6 +58,7 @@ func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
 	var c Command
 
 	// Set default config values
+	c.cfg.maskedHeaders = make(map[string]struct{})
 	c.cfg.maxBodySize = defaultMaxBodySize
 
 	for _, opt := range opts {
@@ -225,8 +226,15 @@ func buildAuth(args []string, cfg config, data requestData, handledHeaders map[s
 		return args
 	}
 
-	authStr := fmt.Sprintf("%s:%s", data.user, data.pass)
-	args = append(args, optionForm(cfg.style, "-u", "--user"), escape(cfg.style, authStr))
+	authValue := fmt.Sprintf("%s:%s", data.user, data.pass)
+
+	// If Authorization is masked, we specifically redact the password part
+	// of the basic auth credential string to prevent leakage in the -u flag.
+	if isMasked(cfg, "Authorization") {
+		authValue = fmt.Sprintf("%s:*****", data.user)
+	}
+
+	args = append(args, optionForm(cfg.style, "-u", "--user"), escape(cfg.style, authValue))
 	handledHeaders["Authorization"] = true
 
 	return args
@@ -317,7 +325,16 @@ func buildHeaders(cfg config, data requestData, handledHeaders map[string]bool) 
 			}
 			continue
 		}
-		headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, strings.Join(values, ", ")))
+
+		value := strings.Join(values, ", ")
+
+		// Check if the header is configured to be masked.
+		// If so, replace the actual value with a placeholder.
+		if isMasked(cfg, canonicalKey) {
+			value = "*****"
+		}
+
+		headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, value))
 	}
 
 	// Host: We only add it explicitly if it differs from the host in the calculated URL.
@@ -363,4 +380,10 @@ func escape(style outputStyle, s string) string {
 
 	v := strings.ReplaceAll(s, "'", "'\\''")
 	return fmt.Sprintf("'%s'", v)
+}
+
+// isMasked checks if the given header key is in the maskedHeaders map.
+func isMasked(cfg config, key string) bool {
+	_, ok := cfg.maskedHeaders[http.CanonicalHeaderKey(key)]
+	return ok
 }

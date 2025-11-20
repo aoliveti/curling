@@ -17,6 +17,7 @@
 * Rebuilds absolute URLs for server-side requests (middleware), handling missing schemes/hosts and proxy headers.
 * Prioritizes `r.Host` over the `Host:` header, mimicking Go's client.
 * Truncates request bodies by default (1KB) to prevent OOM errors.
+* Supports masking specific headers (e.g., API keys, Authorization tokens) to prevent sensitive data leaks in logs.
 * Supports multi-line output, long-form options, and quote styles.
 
 ## Install
@@ -79,7 +80,7 @@ You can override this limit using `WithMaxBodySize()`:
 cmd, _ := curling.NewFromRequest(req, curling.WithMaxBodySize(2*1024*1024))
 ```
 
-### Server-Side URL Reconstruction
+### Server-side URL reconstruction
 
 When used in middleware (server-side), `http.Request` often lacks the `Scheme` and `Host`. The library attempts to reconstruct the full absolute URL by checking (in order):
 
@@ -89,20 +90,21 @@ When used in middleware (server-side), `http.Request` often lacks the `Scheme` a
 
 ### Options
 
-| Option                            | Description                                                          |
-|-----------------------------------|----------------------------------------------------------------------|
-| `WithLongForm()`                  | Use long-form cURL options (e.g., `--request`)                       |
-| `WithFollowRedirects()`           | Set the flag -L, --location                                          |
-| `WithInsecure()`                  | Set the flag -k, --insecure                                          |
-| `WithTrustProxy()`                | Trust `X-Forwarded-Proto` for URL scheme (http/https) reconstruction |
-| `WithSilent()`                    | Set the flag -s, --silent                                            |
-| `WithCompression()`               | Set the flag --compressed                                            |
-| `WithMultiLine()`                 | Use multi-line output (Unix)                                         |
-| `WithWindowsMultiLine()`          | Use multi-line output (Windows CMD)                                  |
-| `WithPowerShellMultiLine()`       | Use multi-line output (PowerShell)                                   |
-| `WithDoubleQuotes()`              | Use double quotes for escaping                                       |
-| `WithRequestTimeout(seconds int)` | Set the flag -m, --max-time                                          |
-| `WithMaxBodySize(bytes int)`      | Override the default 1KB body read limit                             |
+| Option                                 | Description                                                                                                            |
+|----------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `WithLongForm()`                       | Use long-form cURL options (e.g., `--request`)                                                                         |
+| `WithFollowRedirects()`                | Set the flag -L, --location                                                                                            |
+| `WithInsecure()`                       | Set the flag -k, --insecure                                                                                            |
+| `WithTrustProxy()`                     | Trust `X-Forwarded-Proto` for URL scheme (http/https) reconstruction                                                   |
+| `WithSilent()`                         | Set the flag -s, --silent                                                                                              |
+| `WithCompression()`                    | Set the flag --compressed                                                                                              |
+| `WithMultiLine()`                      | Use multi-line output (Unix)                                                                                           |
+| `WithWindowsMultiLine()`               | Use multi-line output (Windows CMD)                                                                                    |
+| `WithPowerShellMultiLine()`            | Use multi-line output (PowerShell)                                                                                     |
+| `WithDoubleQuotes()`                   | Use double quotes for escaping                                                                                         |
+| `WithRequestTimeout(seconds int)`      | Set the flag -m, --max-time                                                                                            |
+| `WithMaskedHeaders(headers ...string)` | Mask specific headers (values replaced with `*****`).<br/>Handles `-u` password redaction if `Authorization` is masked |
+| `WithMaxBodySize(bytes int)`           | Override the default 1KB body read limit                                                                               |
 
 ## License
 

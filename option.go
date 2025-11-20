@@ -1,5 +1,9 @@
 package curling
 
+import (
+	"net/http"
+)
+
 const (
 	// lineContinuationDefault is the default line continuation character (Unix-like).
 	lineContinuationDefault = "\\"
@@ -22,6 +26,8 @@ type config struct {
 	requestTimeout int
 	// maxBodySize is the maximum number of bytes to read from the request body.
 	maxBodySize int
+	// maskedHeaders holds the list of headers to be masked in the output.
+	maskedHeaders map[string]struct{}
 }
 
 // outputStyle groups options related to the command's text formatting.
@@ -152,5 +158,18 @@ func WithMaxBodySize(bytes int) Option {
 func WithTrustProxy() Option {
 	return func(c *Command) {
 		c.cfg.flags.trustProxy = true
+	}
+}
+
+// WithMaskedHeaders configures a list of HTTP headers to be masked in the output.
+// The values of these headers will be replaced with "*****".
+// Special Case: If "Authorization" is included in the list, the password component
+// of the Basic Auth flag (-u) will also be redacted.
+// This option is case-insensitive.
+func WithMaskedHeaders(headers ...string) Option {
+	return func(c *Command) {
+		for _, h := range headers {
+			c.cfg.maskedHeaders[http.CanonicalHeaderKey(h)] = struct{}{}
+		}
 	}
 }
