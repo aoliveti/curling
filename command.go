@@ -118,6 +118,11 @@ func (d *requestData) load(r *http.Request, cfg config) error {
 		// Check Proxy Headers (if trusted)
 		if cfg.flags.trustProxy {
 			if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+				// Handle multiple hops (e.g. "https, http").
+				// We only care about the client's original protocol (the first one).
+				if comma := strings.Index(proto, ","); comma != -1 {
+					proto = strings.TrimSpace(proto[:comma])
+				}
 				d.uri.Scheme = proto
 			}
 		}
@@ -184,7 +189,7 @@ func (c *Command) compile() {
 	handledHeaders := make(map[string]bool)
 
 	commandParts := []string{"curl"}
-	commandParts = buildOptions(commandParts, c.cfg)
+	commandParts = buildOptions(commandParts, c.cfg, c.data)
 	commandParts = buildAuth(commandParts, c.cfg, c.data, handledHeaders)
 	commandParts = buildCookies(commandParts, c.cfg, c.data, handledHeaders)
 	commandParts = buildData(commandParts, c.cfg, c.data)
@@ -208,7 +213,7 @@ func (c *Command) String() string {
 }
 
 // buildOptions adds basic curl flags (-s, -k, -L, -m, --compressed)
-func buildOptions(args []string, cfg config) []string {
+func buildOptions(args []string, cfg config, data requestData) []string {
 	if cfg.flags.silent {
 		args = append(args, optionForm(cfg.style, "-s", "--silent"))
 	}
@@ -224,6 +229,16 @@ func buildOptions(args []string, cfg config) []string {
 	if cfg.flags.location {
 		args = append(args, optionForm(cfg.style, "-L", "--location"))
 	}
+
+	// Smart Globbing:
+	// If the URL contains characters that cURL interprets as globbing ranges ([] or {}),
+	// we automatically disable globbing to treat the URL literally.
+	// This prevents syntax errors with IPv6 addresses (e.g., [::1]) or query parameters
+	// containing brackets (e.g., filters[id]=1).
+	if strings.ContainsAny(data.uri.String(), "[]{}") {
+		args = append(args, optionForm(cfg.style, "-g", "--globoff"))
+	}
+
 	return args
 }
 

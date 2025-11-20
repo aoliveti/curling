@@ -133,6 +133,22 @@ func Test_NewFromRequest_url(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
+			name: "proxy header with multiple hops (comma separated)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodGet,
+					Host:   "example.com",
+					URL:    &url.URL{Path: "/"},
+					Header: http.Header{
+						"X-Forwarded-Proto": []string{"https, http"},
+					},
+				},
+				opts: []Option{WithTrustProxy()},
+			},
+			want:    "curl 'https://example.com/' -H 'X-Forwarded-Proto: https, http'",
+			wantErr: assert.NoError,
+		},
+		{
 			name: "fallback to url host if request host is empty",
 			args: args{
 				r: &http.Request{
@@ -147,7 +163,7 @@ func Test_NewFromRequest_url(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
-			name: "ipv6 host",
+			name: "ipv6 host (globbing disabled by default, short form)",
 			args: args{
 				r: &http.Request{
 					Method: http.MethodGet,
@@ -157,7 +173,22 @@ func Test_NewFromRequest_url(t *testing.T) {
 					},
 				},
 			},
-			want:    "curl 'http://[::1]:9090/ipv6'",
+			want:    "curl -g 'http://[::1]:9090/ipv6'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "ipv6 host (globbing disabled by default, long form)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodGet,
+					Host:   "[::1]:9090",
+					URL: &url.URL{
+						Path: "/ipv6",
+					},
+				},
+				opts: []Option{WithLongForm()},
+			},
+			want:    "curl --globoff 'http://[::1]:9090/ipv6'",
 			wantErr: assert.NoError,
 		},
 		{
