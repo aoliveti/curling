@@ -326,15 +326,18 @@ func buildHeaders(cfg config, data requestData, handledHeaders map[string]bool) 
 			continue
 		}
 
-		value := strings.Join(values, ", ")
+		// Iterate over all values for this header key.
+		// This ensures that headers with multiple values are represented as multiple -H flags,
+		// avoiding data corruption if values contain commas.
+		for _, value := range values {
+			// Check if the header is configured to be masked.
+			// If so, replace the actual value with a placeholder.
+			if isMasked(cfg, canonicalKey) {
+				value = "*****"
+			}
 
-		// Check if the header is configured to be masked.
-		// If so, replace the actual value with a placeholder.
-		if isMasked(cfg, canonicalKey) {
-			value = "*****"
+			headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, value))
 		}
-
-		headers = append(headers, fmt.Sprintf("%s: %s", canonicalKey, value))
 	}
 
 	// Host: We only add it explicitly if it differs from the host in the calculated URL.

@@ -71,7 +71,7 @@ func Test_NewFromRequest_headers(t *testing.T) {
 					Header: multiValueHeader,
 				},
 			},
-			want:    "curl 'https://localhost/test' -H 'X-Key-Multi: value 1, value 2'",
+			want:    "curl 'https://localhost/test' -H 'X-Key-Multi: value 1' -H 'X-Key-Multi: value 2'",
 			wantErr: assert.NoError,
 		},
 		{
@@ -83,7 +83,7 @@ func Test_NewFromRequest_headers(t *testing.T) {
 					Header: additionalHeader,
 				},
 			},
-			want:    "curl 'https://localhost/test' -H 'X-Key-A: bar' -H 'X-Key-Z: foo, alpha, baz'",
+			want:    "curl 'https://localhost/test' -H 'X-Key-A: bar' -H 'X-Key-Z: alpha' -H 'X-Key-Z: baz' -H 'X-Key-Z: foo'",
 			wantErr: assert.NoError,
 		},
 		{
@@ -120,7 +120,7 @@ func Test_NewFromRequest_headers(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want:    "curl 'https://localhost/test' --header 'X-Key-Multi: value 1, value 2'",
+			want:    "curl 'https://localhost/test' --header 'X-Key-Multi: value 1' --header 'X-Key-Multi: value 2'",
 			wantErr: assert.NoError,
 		},
 		{
@@ -133,7 +133,7 @@ func Test_NewFromRequest_headers(t *testing.T) {
 				},
 				opts: []Option{WithLongForm()},
 			},
-			want:    "curl 'https://localhost/test' --header 'X-Key-A: bar' --header 'X-Key-Z: foo, alpha, baz'",
+			want:    "curl 'https://localhost/test' --header 'X-Key-A: bar' --header 'X-Key-Z: alpha' --header 'X-Key-Z: baz' --header 'X-Key-Z: foo'",
 			wantErr: assert.NoError,
 		},
 		{
