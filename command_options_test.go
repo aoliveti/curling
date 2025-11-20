@@ -169,25 +169,148 @@ func Test_NewFromRequest_options(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
-			name: "windows multiline option",
+			name: "bash double quotes with history expansion char (!)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("Hello!")),
+				},
+				opts: []Option{WithDoubleQuotes()},
+			},
+			want:    "curl --data-raw \"Hello!\" \"https://localhost/test\"",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "windows cmd empty body",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("")),
+				},
+				opts: []Option{WithWindowsMultiLine()},
+			},
+			want:    "curl --data-raw \"\" \"https://localhost/test\"",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "windows cmd path backslashes",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`C:\Windows\System32`)),
+				},
+				opts: []Option{WithWindowsMultiLine()},
+			},
+			want:    "curl --data-raw \"C:\\Windows\\System32\" \"https://localhost/test\"",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "windows cmd trailing backslash",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`Folder\`)),
+				},
+				opts: []Option{WithWindowsMultiLine()},
+			},
+			want:    `curl --data-raw "Folder\\" "https://localhost/test"`,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "windows cmd backslash before quote (trigger doubling)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`path=\"`)),
+				},
+				opts: []Option{WithWindowsMultiLine()},
+			},
+			want:    `curl --data-raw "path=\\\"" "https://localhost/test"`,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "windows cmd multiple backslashes before quote",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					// Input: Two backslashes before a quote: \\"
+					Body: io.NopCloser(strings.NewReader(`Wait\\"`)),
+				},
+				opts: []Option{WithWindowsMultiLine()},
+			},
+			want:    `curl --data-raw "Wait\\\\\"" "https://localhost/test"`,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "windows multiline option (enforce double quotes)",
 			args: args{
 				r: &http.Request{
 					URL: testUrl,
 				},
 				opts: []Option{WithWindowsMultiLine()},
 			},
-			want:    "curl 'https://localhost/test'",
+			want:    "curl \"https://localhost/test\"",
 			wantErr: assert.NoError,
 		},
 		{
-			name: "powershell multiline option",
+			name: "windows multiline option",
 			args: args{
 				r: &http.Request{
 					URL: testUrl,
 				},
+				opts: []Option{WithWindowsMultiLine(), WithDoubleQuotes()},
+			},
+			want:    "curl \"https://localhost/test\"",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "powershell single quote escaping (default)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("It's a 'tricky' test")),
+				},
 				opts: []Option{WithPowerShellMultiLine()},
 			},
-			want:    "curl 'https://localhost/test'",
+			// PowerShell uses '' to escape a single quote inside single-quoted strings
+			want:    "curl --data-raw 'It''s a ''tricky'' test' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "powershell double quotes escaping (variables and quotes)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					// Body contains: $cost = "100"
+					Body: io.NopCloser(strings.NewReader(`$cost = "100"`)),
+				},
+				opts: []Option{WithPowerShellMultiLine(), WithDoubleQuotes()},
+			},
+			// PowerShell uses backtick (`) to escape $ and " inside double-quoted strings
+			want:    "curl --data-raw \"`$cost = `\"100`\"\" \"https://localhost/test\"",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "powershell double quotes escaping (backticks)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					// Body contains a literal backtick: cmd `exec`
+					Body: io.NopCloser(strings.NewReader("cmd `exec`")),
+				},
+				opts: []Option{WithPowerShellMultiLine(), WithDoubleQuotes()},
+			},
+			// The backtick itself must be escaped with another backtick (``)
+			want:    "curl --data-raw \"cmd ``exec``\" \"https://localhost/test\"",
 			wantErr: assert.NoError,
 		},
 		{

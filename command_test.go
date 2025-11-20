@@ -66,6 +66,7 @@ func TestCommand_String(t *testing.T) {
 					style: outputStyle{
 						useMultiLine:     true,
 						lineContinuation: lineContinuationDefault,
+						shell:            shellUnix,
 					},
 				},
 			},

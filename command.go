@@ -372,21 +372,106 @@ func optionForm(style outputStyle, short, long string) string {
 	return short
 }
 
-// escape escapes a string based on config.
+// isMasked checks if the given header key is in the maskedHeaders map.
+func isMasked(cfg config, key string) bool {
+	_, ok := cfg.maskedHeaders[http.CanonicalHeaderKey(key)]
+	return ok
+}
+
+// escape sanitizes the string based on the configured shell type.
 func escape(style outputStyle, s string) string {
+	switch style.shell {
+	case shellPowerShell:
+		return escapePowerShell(style, s)
+	case shellWindowsCMD:
+		return escapeWindowsCMD(s)
+	default:
+		return escapeUnix(style, s)
+	}
+}
+
+// escapeUnix handles escaping for Bash/Zsh/Unix shells.
+func escapeUnix(style outputStyle, s string) string {
 	if style.useDoubleQuotes {
-		v := strings.ReplaceAll(s, "\"", "\\\"")
+		// Bash Double Quotes: escape \ " ` $
+		v := strings.ReplaceAll(s, "\\", "\\\\")
+		v = strings.ReplaceAll(v, "\"", "\\\"")
 		v = strings.ReplaceAll(v, "`", "\\`")
 		v = strings.ReplaceAll(v, "$", "\\$")
 		return fmt.Sprintf("\"%s\"", v)
 	}
 
+	// Bash Single Quotes: strictly literal, escape ' as '\''
 	v := strings.ReplaceAll(s, "'", "'\\''")
 	return fmt.Sprintf("'%s'", v)
 }
 
-// isMasked checks if the given header key is in the maskedHeaders map.
-func isMasked(cfg config, key string) bool {
-	_, ok := cfg.maskedHeaders[http.CanonicalHeaderKey(key)]
-	return ok
+// escapePowerShell handles escaping for PowerShell.
+func escapePowerShell(style outputStyle, s string) string {
+	if style.useDoubleQuotes {
+		// PowerShell Double Quotes: escape ` " $
+		// Note: Backslash is NOT escaped in PS strings usually, but Backtick is.
+		v := strings.ReplaceAll(s, "`", "``")
+		v = strings.ReplaceAll(v, "\"", "`\"")
+		v = strings.ReplaceAll(v, "$", "`$")
+		return fmt.Sprintf("\"%s\"", v)
+	}
+
+	// PowerShell Single Quotes: escape ' as ''
+	v := strings.ReplaceAll(s, "'", "''")
+	return fmt.Sprintf("'%s'", v)
+}
+
+// escapeWindowsCMD handles escaping for Windows Command Prompt (cmd.exe).
+// It follows Microsoft C Runtime parsing rules.
+// Arguments are wrapped in double quotes.
+// Backslashes are literal, unless they precede a double quote.
+// If they precede a double quote, they must be doubled.
+// Double quotes are escaped as \".
+// Trailing backslashes (preceding the closing quote) must be doubled.
+func escapeWindowsCMD(s string) string {
+	if s == "" {
+		return "\"\""
+	}
+
+	var sb strings.Builder
+	// Pre-allocate: original length + 2 quotes + margin for escapes
+	sb.Grow(len(s) + 16)
+	sb.WriteByte('"') // Opening quote
+
+	backslashCount := 0
+	for _, c := range s {
+		switch c {
+		case '\\':
+			backslashCount++
+			continue
+
+		case '"':
+			// Backslashes before a quote must be doubled (N -> 2N)
+			if backslashCount > 0 {
+				sb.WriteString(strings.Repeat("\\", backslashCount*2))
+			}
+			backslashCount = 0
+			// Escape the quote itself
+			sb.WriteString(`\"`)
+			continue
+		}
+
+		// Default case: Normal character
+		// Flush pending backslashes literally (N -> N)
+		if backslashCount > 0 {
+			sb.WriteString(strings.Repeat("\\", backslashCount))
+		}
+		backslashCount = 0
+		sb.WriteRune(c)
+	}
+
+	// Handle trailing backslashes (at the end of the string).
+	// They must be doubled because they technically precede the closing quote.
+	if backslashCount > 0 {
+		sb.WriteString(strings.Repeat("\\", backslashCount*2))
+	}
+
+	sb.WriteByte('"') // Closing quote
+	return sb.String()
 }

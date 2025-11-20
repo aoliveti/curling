@@ -5,6 +5,15 @@ import (
 )
 
 const (
+	// shellUnix targets Unix-like shells (Bash, Zsh, Sh).
+	shellUnix shellType = iota
+	// shellPowerShell targets Windows PowerShell.
+	shellPowerShell
+	// shellWindowsCMD targets the classic Windows Command Prompt.
+	shellWindowsCMD
+)
+
+const (
 	// lineContinuationDefault is the default line continuation character (Unix-like).
 	lineContinuationDefault = "\\"
 	// lineContinuationWindows is the line continuation character for Windows CMD.
@@ -15,6 +24,8 @@ const (
 	// defaultMaxBodySize is the default maximum body size (in bytes).
 	defaultMaxBodySize = 1024
 )
+
+type shellType int
 
 // config holds all user-configurable settings.
 type config struct {
@@ -36,6 +47,8 @@ type outputStyle struct {
 	useMultiLine     bool
 	useDoubleQuotes  bool
 	lineContinuation string
+	// shell determines the escaping rules to apply.
+	shell shellType
 }
 
 // curlFlags groups common boolean cURL flags.
@@ -93,6 +106,7 @@ func WithMultiLine() Option {
 	return func(c *Command) {
 		c.cfg.style.useMultiLine = true
 		c.cfg.style.lineContinuation = lineContinuationDefault
+		c.cfg.style.shell = shellUnix
 	}
 }
 
@@ -102,6 +116,7 @@ func WithWindowsMultiLine() Option {
 	return func(c *Command) {
 		c.cfg.style.useMultiLine = true
 		c.cfg.style.lineContinuation = lineContinuationWindows
+		c.cfg.style.shell = shellWindowsCMD
 	}
 }
 
@@ -111,6 +126,7 @@ func WithPowerShellMultiLine() Option {
 	return func(c *Command) {
 		c.cfg.style.useMultiLine = true
 		c.cfg.style.lineContinuation = lineContinuationPowerShell
+		c.cfg.style.shell = shellPowerShell
 	}
 }
 
