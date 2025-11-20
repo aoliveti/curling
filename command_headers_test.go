@@ -256,6 +256,25 @@ func Test_NewFromRequest_headers(t *testing.T) {
 			want:    "curl --cookie 'c1=v1' 'https://localhost/test'",
 			wantErr: assert.NoError,
 		},
+		{
+			name: "should mask headers",
+			args: args{
+				r: func() *http.Request {
+					r := &http.Request{
+						Method: http.MethodGet,
+						URL:    testUrl,
+						Header: http.Header{},
+					}
+					r.SetBasicAuth("user", "pass")
+					r.Header.Set("X-Api-Key", "api-kei")
+					r.Header.Set("X-User-Agent", "user-agent")
+					return r
+				}(),
+				opts: []Option{WithMaskedHeaders("Authorization", "X-Api-Key")},
+			},
+			want:    "curl -u 'user:*****' 'https://localhost/test' -H 'X-Api-Key: *****' -H 'X-User-Agent: user-agent'",
+			wantErr: assert.NoError,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
