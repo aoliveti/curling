@@ -302,6 +302,84 @@ func Test_NewFromRequest_body(t *testing.T) {
 			want:    "curl --data-raw 'abcdefghij... (truncated body)' 'https://localhost/test'",
 			wantErr: assert.NoError,
 		},
+		{
+			name: "json masking success",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`{"user": "admin", "pass": "secret", "meta": {"token": "123"}}`)),
+				},
+				opts: []Option{WithMaskedJSONFields("pass", "token")},
+			},
+			want:    `curl --data-raw '{"meta":{"token":"*****"},"pass":"*****","user":"admin"}' 'https://localhost/test'`,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "json masking inside array",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`[{"id": 1, "token": "secret1"}, {"id": 2, "token": "secret2"}]`)),
+				},
+				opts: []Option{WithMaskedJSONFields("token")},
+			},
+			want:    `curl --data-raw '[{"id":1,"token":"*****"},{"id":2,"token":"*****"}]' 'https://localhost/test'`,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "json masking top-level object",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`{"id": 101, "billing": {"card": "4444", "address": {"city": "Rome"}}}`)),
+				},
+				opts: []Option{WithMaskedJSONFields("billing")},
+			},
+			want:    `curl --data-raw '{"billing":"*****","id":101}' 'https://localhost/test'`,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "json masking fast check failure (non-json body)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("plain text body starting with non-json char")),
+				},
+				opts: []Option{WithMaskedJSONFields("password")},
+			},
+			want:    "curl --data-raw '[CONTENT MASKED: invalid or truncated JSON]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "json masking fail-secure on invalid json",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`{"user": "admin", "pass": "sec`)),
+				},
+				opts: []Option{WithMaskedJSONFields("pass")},
+			},
+			want:    "curl --data-raw '[CONTENT MASKED: invalid or truncated JSON]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "json masking fail-secure on truncation",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`{"user": "admin", "pass": "sec"}`)),
+				},
+				opts: []Option{WithMaskedJSONFields("pass"), WithMaxBodySize(5)},
+			},
+			want:    "curl --data-raw '[CONTENT MASKED: invalid or truncated JSON]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

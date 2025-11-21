@@ -16,8 +16,7 @@
 * **Smart URL Handling:** Rebuilds absolute URLs for server-side requests (handling multi-hop proxies) and auto-disables globbing (`-g`) for IPv6 or array parameters.
 * **RFC Compliance:** Handles multi-value headers as separate flags and strictly prioritizes `r.Host` (RFC 7230).
 * **Safety:** Automatically removes `Content-Length` to prevent cURL errors and truncates request bodies (1KB default) to avoid OOM.
-* **Header Privacy:** Supports masking specific headers (`*****`) or substituting them with environment variables (`$VAR`).
-* **Body Security:** Supports masking the entire request body (`[CONTENT MASKED]`) to prevent PII leakage.
+* **Privacy & Security:** Supports masking headers (`*****`), specific JSON keys, or the entire body (`[CONTENT MASKED]`). Also supports environment variable substitution (`$VAR`).
 * **Deterministic Output:** Sorts headers and cookies alphabetically for consistent testing/logging.
 * **Formatting:** Converts Basic Auth to `-u`, Cookies to `-b`, and supports multi-line output with shell-specific escaping (Bash, PowerShell, CMD).
 
@@ -101,6 +100,16 @@ cmd, _ := curling.NewFromRequest(req, curling.WithEnvVar("Authorization", "$API_
 // Output: curl ... -H 'Authorization: $API_TOKEN'
 ```
 
+### JSON body privacy
+
+Redact specific keys within a JSON request body while preserving the structure. If the body is truncated or invalid JSON, it falls back to masking the entire body for safety.
+
+```go
+// Masks "password" recursively in the JSON body
+cmd, _ := curling.NewFromRequest(req, curling.WithMaskedJSONFields("password"))
+// Output: curl ... --data-raw '{"user":"admin","password":"*****"}'
+```
+
 ### Options
 
 | Option                                 | Description                                                                                                 |
@@ -118,6 +127,7 @@ cmd, _ := curling.NewFromRequest(req, curling.WithEnvVar("Authorization", "$API_
 | `WithRequestTimeout(seconds int)`      | Set the flag -m, --max-time                                                                                 |
 | `WithMaskedHeaders(headers ...string)` | Mask specific **headers** (`*****`). Handles `-u` password redaction if `Authorization` is masked           |
 | `WithMaskedBody()`                     | Replace the **request body** with `[CONTENT MASKED]` for security                                           |
+| `WithMaskedJSONFields(keys ...string)` | Mask specific **JSON keys** in the body (`*****`). Falls back to total masking if JSON is invalid           |
 | `WithEnvVar(header, variable string)`  | Replace a **header value** with an environment variable placeholder (e.g., `$TOKEN`). Priority over masking |
 | `WithMaxBodySize(bytes int)`           | Override the default 1KB body read limit                                                                    |
 

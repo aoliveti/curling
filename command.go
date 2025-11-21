@@ -3,6 +3,7 @@ package curling
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -292,6 +293,19 @@ func buildData(args []string, cfg config, data requestData) []string {
 
 	body := data.body.String()
 
+	if len(cfg.maskedJSONFields) > 0 {
+		if data.bodyTruncated {
+			return append(args, "--data-raw", escape(cfg.style, "[CONTENT MASKED: invalid or truncated JSON]"))
+		}
+
+		maskedBody, err := maskJSONContent(body, cfg.maskedJSONFields)
+		if err != nil {
+			return append(args, "--data-raw", escape(cfg.style, "[CONTENT MASKED: invalid or truncated JSON]"))
+		}
+
+		return append(args, "--data-raw", escape(cfg.style, maskedBody))
+	}
+
 	// Add the marker if the body was truncated
 	if data.bodyTruncated {
 		if data.contentLength > 0 {
@@ -428,6 +442,43 @@ func sanitizeHeaderValue(cfg config, key, value string) string {
 func isMasked(cfg config, key string) bool {
 	_, ok := cfg.maskedHeaders[http.CanonicalHeaderKey(key)]
 	return ok
+}
+
+// maskJSONContent parses the body and redacts specific keys recursively.
+// Returns an error if the body is not valid JSON.
+func maskJSONContent(body string, fields map[string]struct{}) (string, error) {
+	trimmed := strings.TrimSpace(body)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return "", fmt.Errorf("not a valid JSON object or array")
+	}
+
+	var v interface{}
+	if err := json.Unmarshal([]byte(trimmed), &v); err != nil {
+		return "", err
+	}
+
+	maskJSONFields(v, fields)
+
+	maskedBody, err := json.Marshal(v)
+	return string(maskedBody), err
+}
+
+// maskJSONFields traverses the interface{} tree to find and mask the JSON fields.
+func maskJSONFields(data interface{}, fields map[string]struct{}) {
+	switch d := data.(type) {
+	case map[string]interface{}:
+		for k, v := range d {
+			if _, ok := fields[k]; ok {
+				d[k] = "*****"
+				continue
+			}
+			maskJSONFields(v, fields)
+		}
+	case []interface{}:
+		for _, v := range d {
+			maskJSONFields(v, fields)
+		}
+	}
 }
 
 // escape sanitizes the string based on the configured shell type.
