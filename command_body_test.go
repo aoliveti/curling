@@ -83,6 +83,71 @@ func Test_NewFromRequest_body(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
+			name: "masked body option",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("sensitive-secret-data")),
+				},
+				opts: []Option{WithMaskedBody()},
+			},
+			want:    "curl --data-raw '[CONTENT MASKED]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "masked body priority over max size",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("very-long-sensitive-data")),
+				},
+				opts: []Option{WithMaskedBody(), WithMaxBodySize(5)},
+			},
+			want:    "curl --data-raw '[CONTENT MASKED]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "masked body with nil body",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   nil,
+				},
+				opts: []Option{WithMaskedBody()},
+			},
+			want:    "curl -X 'POST' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "masked body with http.NoBody",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   http.NoBody,
+				},
+				opts: []Option{WithMaskedBody()},
+			},
+			want:    "curl -X 'POST' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "masked body with empty string reader",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("")),
+				},
+				opts: []Option{WithMaskedBody()},
+			},
+			want:    "curl --data-raw '[CONTENT MASKED]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
 			name: "short form body",
 			args: args{
 				r: &http.Request{
@@ -304,4 +369,28 @@ func TestNewFromRequest_BodyRestoration(t *testing.T) {
 			assert.Equal(t, tt.originalBody, restoredBody, "Body content was not restored correctly")
 		})
 	}
+}
+
+func TestNewFromRequest_BodyRestoration_Masked(t *testing.T) {
+	t.Parallel()
+
+	testUrl := &url.URL{
+		Scheme: "https",
+		Host:   "localhost",
+	}
+	originalData := []byte("sensitive-data")
+
+	r := &http.Request{
+		Method: http.MethodPost,
+		URL:    testUrl,
+		Body:   io.NopCloser(bytes.NewReader(originalData)),
+	}
+
+	_, err := NewFromRequest(r, WithMaskedBody())
+	require.NoError(t, err)
+
+	restoredBody, err := io.ReadAll(r.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, originalData, restoredBody)
 }

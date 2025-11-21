@@ -41,6 +41,8 @@ type config struct {
 	maskedHeaders map[string]struct{}
 	// envSubstitutions maps header keys to environment variable names.
 	envSubstitutions map[string]string
+	// maskBody determines if the request body should be redacted in the output.
+	maskBody bool
 }
 
 // outputStyle groups options related to the command's text formatting.
@@ -206,5 +208,13 @@ func WithEnvVar(header, variableName string) Option {
 		}
 
 		c.cfg.envSubstitutions[http.CanonicalHeaderKey(header)] = variableName
+	}
+}
+
+// WithMaskedBody masks the request body with a static placeholder ("[CONTENT MASKED]").
+// This is crucial for preventing sensitive data (passwords, PII) in the body from leaking into logs.
+func WithMaskedBody() Option {
+	return func(c *Command) {
+		c.cfg.maskBody = true
 	}
 }

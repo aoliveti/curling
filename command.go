@@ -137,8 +137,14 @@ func (d *requestData) load(r *http.Request, cfg config) error {
 		}
 	}
 
-	// If there is no body, we're done.
+	// If there is no Body, we're done.
 	if r.Body == nil || r.Body == http.NoBody {
+		return nil
+	}
+
+	// If body masking is enabled, we skip reading the body entirely.
+	if cfg.maskBody {
+		d.hasData = true
 		return nil
 	}
 
@@ -276,8 +282,12 @@ func buildCookies(args []string, cfg config, data requestData, handledHeaders ma
 // buildData adds the --data-raw flag if data exists.
 func buildData(args []string, cfg config, data requestData) []string {
 	// We only add the flag if a body was present (even if empty).
-	if data.body == nil {
+	if !data.hasData {
 		return args
+	}
+
+	if cfg.maskBody {
+		return append(args, "--data-raw", escape(cfg.style, "[CONTENT MASKED]"))
 	}
 
 	body := data.body.String()
@@ -424,7 +434,7 @@ func isMasked(cfg config, key string) bool {
 func escape(style outputStyle, s string) string {
 	switch style.shell {
 	case shellPowerShell:
-		return escapePowerShell(style, s)
+		return escapePowerShell(s)
 	case shellWindowsCMD:
 		return escapeWindowsCMD(s)
 	default:
@@ -449,19 +459,16 @@ func escapeUnix(style outputStyle, s string) string {
 }
 
 // escapePowerShell handles escaping for PowerShell.
-func escapePowerShell(style outputStyle, s string) string {
-	if style.useDoubleQuotes {
-		// PowerShell Double Quotes: escape ` " $
-		// Note: Backslash is NOT escaped in PS strings usually, but Backtick is.
-		v := strings.ReplaceAll(s, "`", "``")
-		v = strings.ReplaceAll(v, "\"", "`\"")
-		v = strings.ReplaceAll(v, "$", "`$")
-		return fmt.Sprintf("\"%s\"", v)
-	}
-
-	// PowerShell Single Quotes: escape ' as ''
-	v := strings.ReplaceAll(s, "'", "''")
-	return fmt.Sprintf("'%s'", v)
+// We enforce double quotes to safely handle variables and special characters using backticks.
+func escapePowerShell(s string) string {
+	// PowerShell Double Quotes Rules:
+	// - Escape backtick (`) with another backtick (``).
+	// - Escape double quote (") with backtick (`").
+	// - Escape variable start ($) with backtick (`$).
+	v := strings.ReplaceAll(s, "`", "``")
+	v = strings.ReplaceAll(v, "\"", "`\"")
+	v = strings.ReplaceAll(v, "$", "`$")
+	return fmt.Sprintf("\"%s\"", v)
 }
 
 // escapeWindowsCMD handles escaping for Windows Command Prompt (cmd.exe).
