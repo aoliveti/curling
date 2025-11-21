@@ -43,6 +43,8 @@ type config struct {
 	envSubstitutions map[string]string
 	// maskBody determines if the request body should be redacted in the output.
 	maskBody bool
+	// maskedJSONFields holds the list of JSON fields to be masked in the output.
+	maskedJSONFields map[string]struct{}
 }
 
 // outputStyle groups options related to the command's text formatting.
@@ -216,5 +218,20 @@ func WithEnvVar(header, variableName string) Option {
 func WithMaskedBody() Option {
 	return func(c *Command) {
 		c.cfg.maskBody = true
+	}
+}
+
+// WithMaskedJSONFields configures a list of JSON keys to be redacted in the request body.
+// It parses the body as JSON and recursively replaces the values of matching keys with "*****", handling nested objects and arrays.
+// If the body is not valid JSON or is truncated, the library falls back to masking the entire body to ensure no secrets are leaked (fail-secure behavior).
+// Note that if WithMaskedBody is also enabled, this option is ignored as total masking takes precedence.
+func WithMaskedJSONFields(fields ...string) Option {
+	return func(c *Command) {
+		if c.cfg.maskedJSONFields == nil {
+			c.cfg.maskedJSONFields = make(map[string]struct{})
+		}
+		for _, f := range fields {
+			c.cfg.maskedJSONFields[f] = struct{}{}
+		}
 	}
 }
