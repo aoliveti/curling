@@ -16,15 +16,16 @@
 * **Smart URL Handling:** Rebuilds absolute URLs for server-side requests (handling multi-hop proxies) and auto-disables globbing (`-g`) for IPv6 or array parameters.
 * **RFC Compliance:** Handles multi-value headers as separate flags and strictly prioritizes `r.Host` (RFC 7230).
 * **Safety:** Automatically removes `Content-Length` to prevent cURL errors and truncates request bodies (1KB default) to avoid OOM.
-* **Privacy & Security:** Supports masking headers (`*****`) or substituting them with environment variables (`$VAR`).
+* **Header Privacy:** Supports masking specific headers (`*****`) or substituting them with environment variables (`$VAR`).
+* **Body Security:** Supports masking the entire request body (`[CONTENT MASKED]`) to prevent PII leakage.
 * **Deterministic Output:** Sorts headers and cookies alphabetically for consistent testing/logging.
-* **Formatting:** Converts Basic Auth to `-u`, Cookies to `-b`, and supports multi-line output/quoting styles.
+* **Formatting:** Converts Basic Auth to `-u`, Cookies to `-b`, and supports multi-line output with shell-specific escaping (Bash, PowerShell, CMD).
 
 ## Install
 
 ```sh
 go get -u github.com/aoliveti/curling
-````
+```
 
 ## Usage
 
@@ -68,7 +69,7 @@ func main() {
 curl -u 'user:pass' -b 'session=abc12345' --data-raw '{"hello": "world"}' 'https://api.example.com/test' -H 'X-Request-Id: 12345'
 ```
 
-### Body Truncation
+### Body truncation
 
 By default, request bodies are truncated to 1KB. The output includes a marker:
 `... (truncated body, total 5000 bytes)`
@@ -91,31 +92,34 @@ When used in middleware (server-side), `http.Request` often lacks the `Scheme` a
 
 ### Environment variable substitution
 
-Replace sensitive or dynamic header values with shell environment variables for documentation-friendly output:
+Replace sensitive or dynamic **header values** with shell environment variables (e.g., `$TOKEN`).
+This keeps debug logs clean and safe to share (no secrets leaked), while allowing the command to remain executable in terminals where the variable is set.
 
 ```go
+// Use $API_TOKEN instead of the actual value in the output
 cmd, _ := curling.NewFromRequest(req, curling.WithEnvVar("Authorization", "$API_TOKEN"))
 // Output: curl ... -H 'Authorization: $API_TOKEN'
 ```
 
-## Options
+### Options
 
-| Option                                   | Description                                                                                                            |
-|------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
-| `WithLongForm()`                         | Use long-form cURL options (e.g., `--request`)                                                                         |
-| `WithFollowRedirects()`                  | Set the flag -L, --location                                                                                            |
-| `WithInsecure()`                         | Set the flag -k, --insecure                                                                                            |
-| `WithTrustProxy()`                       | Trust `X-Forwarded-Proto` for URL scheme reconstruction                                                                |
-| `WithSilent()`                           | Set the flag -s, --silent                                                                                              |
-| `WithCompression()`                      | Set the flag --compressed                                                                                              |
-| `WithMultiLine()`                        | Use multi-line output (Unix)                                                                                           |
-| `WithWindowsMultiLine()`                 | Use multi-line output (Windows CMD)                                                                                    |
-| `WithPowerShellMultiLine()`              | Use multi-line output (PowerShell)                                                                                     |
-| `WithDoubleQuotes()`                     | Use double quotes for escaping                                                                                         |
-| `WithRequestTimeout(seconds int)`        | Set the flag -m, --max-time                                                                                            |
-| `WithMaskedHeaders(headers ...string)`   | Mask specific headers (`*****`). Handles `-u` password redaction if `Authorization` is masked                          |
-| `WithEnvVar(header, variable string)`    | Replace a header value with an environment variable placeholder (e.g., `$TOKEN`). Priority over masking                |
-| `WithMaxBodySize(bytes int)`             | Override the default 1KB body read limit                                                                               |
+| Option                                 | Description                                                                                                 |
+|----------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| `WithLongForm()`                       | Use long-form cURL options (e.g., `--request`)                                                              |
+| `WithFollowRedirects()`                | Set the flag -L, --location                                                                                 |
+| `WithInsecure()`                       | Set the flag -k, --insecure                                                                                 |
+| `WithTrustProxy()`                     | Trust `X-Forwarded-Proto` for URL scheme reconstruction                                                     |
+| `WithSilent()`                         | Set the flag -s, --silent                                                                                   |
+| `WithCompression()`                    | Set the flag --compressed                                                                                   |
+| `WithMultiLine()`                      | Use multi-line output (Unix/Bash)                                                                           |
+| `WithWindowsMultiLine()`               | Use multi-line output (Windows CMD)                                                                         |
+| `WithPowerShellMultiLine()`            | Use multi-line output (PowerShell)                                                                          |
+| `WithDoubleQuotes()`                   | Use double quotes for escaping (Bash only)                                                                  |
+| `WithRequestTimeout(seconds int)`      | Set the flag -m, --max-time                                                                                 |
+| `WithMaskedHeaders(headers ...string)` | Mask specific **headers** (`*****`). Handles `-u` password redaction if `Authorization` is masked           |
+| `WithMaskedBody()`                     | Replace the **request body** with `[CONTENT MASKED]` for security                                           |
+| `WithEnvVar(header, variable string)`  | Replace a **header value** with an environment variable placeholder (e.g., `$TOKEN`). Priority over masking |
+| `WithMaxBodySize(bytes int)`           | Override the default 1KB body read limit                                                                    |
 
 ## License
 

@@ -270,21 +270,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
-			name: "powershell single quote escaping (default)",
-			args: args{
-				r: &http.Request{
-					Method: http.MethodPost,
-					URL:    testUrl,
-					Body:   io.NopCloser(strings.NewReader("It's a 'tricky' test")),
-				},
-				opts: []Option{WithPowerShellMultiLine()},
-			},
-			// PowerShell uses '' to escape a single quote inside single-quoted strings
-			want:    "curl --data-raw 'It''s a ''tricky'' test' 'https://localhost/test'",
-			wantErr: assert.NoError,
-		},
-		{
-			name: "powershell double quotes escaping (variables and quotes)",
+			name: "powershell double quotes escaping (default)",
 			args: args{
 				r: &http.Request{
 					Method: http.MethodPost,
