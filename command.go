@@ -206,7 +206,7 @@ func (c *Command) compile() {
 
 	headerParts := buildHeaders(c.cfg, c.data, handledHeaders)
 
-	tokens := make([]string, 0, len(commandParts)+len(headerParts))
+	tokens := make([]string, 0, len(commandParts))
 	tokens = append(tokens, commandParts...)
 	tokens = append(tokens, headerParts...)
 	c.tokens = tokens
