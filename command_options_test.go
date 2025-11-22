@@ -370,6 +370,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 					Body: io.NopCloser(strings.NewReader("data")),
 				},
 				opts: []Option{
+					WithTargetShell(POSIX),
 					WithFollowRedirects(),
 					WithCompression(),
 					WithInsecure(),
