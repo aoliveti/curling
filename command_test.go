@@ -66,11 +66,11 @@ func TestCommand_String(t *testing.T) {
 					style: outputStyle{
 						useMultiLine:     true,
 						lineContinuation: lineContinuationDefault,
-						shell:            shellUnix,
+						shell:            POSIX,
 					},
 				},
 			},
-			want: "curl -X 'POST' 'https://localhost/test' \\\n-H 'X-Key-1: 1' \\\n-d 'key=value'",
+			want: "curl -X 'POST' 'https://localhost/test' \\\n  -H 'X-Key-1: 1' \\\n  -d 'key=value'",
 		},
 	}
 	for _, tt := range tests {
@@ -82,9 +82,8 @@ func TestCommand_String(t *testing.T) {
 				cfg:    tt.fields.cfg,
 			}
 
-			if got := c.String(); got != tt.want {
-				t.Errorf("String() = %v, want %v", got, tt.want)
-			}
+			got := c.String()
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

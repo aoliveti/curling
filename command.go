@@ -61,6 +61,8 @@ func NewFromRequest(r *http.Request, opts ...Option) (*Command, error) {
 
 	// Set default config values
 	c.cfg.maxBodySize = defaultMaxBodySize
+	c.cfg.style.lineContinuation = lineContinuationDefault
+	c.cfg.style.shell = POSIX
 
 	for _, opt := range opts {
 		opt(&c)
@@ -204,18 +206,38 @@ func (c *Command) compile() {
 
 	headerParts := buildHeaders(c.cfg, c.data, handledHeaders)
 
-	c.tokens = assembleTokens(commandParts, headerParts)
+	tokens := make([]string, 0, len(commandParts)+len(headerParts))
+	tokens = append(tokens, commandParts...)
+	tokens = append(tokens, headerParts...)
+	c.tokens = tokens
 }
 
 // String returns the cURL command.
 func (c *Command) String() string {
-	separator := " "
-	if c.cfg.style.useMultiLine {
-		separator = fmt.Sprintf(" %s\n", c.cfg.style.lineContinuation)
+	if len(c.tokens) == 0 {
+		return ""
 	}
 
-	s := strings.Join(c.tokens, separator)
-	return strings.TrimSpace(s)
+	// Single-line mode (default): just join tokens with spaces.
+	if !c.cfg.style.useMultiLine {
+		return strings.Join(c.tokens, " ")
+	}
+
+	// Multi-line mode: use continuation character and indentation.
+	var sb strings.Builder
+	// separator: space + continuation char + newline + 2 spaces indentation
+	sep := fmt.Sprintf(" %s\n  ", c.cfg.style.lineContinuation)
+
+	// The first token (curl) acts as the anchor, no indentation prefix.
+	sb.WriteString(c.tokens[0])
+
+	// Subsequent tokens get the indented separator prefix.
+	for _, token := range c.tokens[1:] {
+		sb.WriteString(sep)
+		sb.WriteString(token)
+	}
+
+	return sb.String()
 }
 
 // buildOptions adds basic curl flags (-s, -k, -L, -m, --compressed)
@@ -224,7 +246,8 @@ func buildOptions(args []string, cfg config, data requestData) []string {
 		args = append(args, optionForm(cfg.style, "-s", "--silent"))
 	}
 	if cfg.requestTimeout > 0 {
-		args = append(args, optionForm(cfg.style, "-m", "--max-time"), strconv.Itoa(cfg.requestTimeout))
+		flag := optionForm(cfg.style, "-m", "--max-time")
+		args = append(args, fmt.Sprintf("%s %s", flag, strconv.Itoa(cfg.requestTimeout)))
 	}
 	if cfg.flags.insecure {
 		args = append(args, optionForm(cfg.style, "-k", "--insecure"))
@@ -287,23 +310,27 @@ func buildData(args []string, cfg config, data requestData) []string {
 		return args
 	}
 
+	appendData := func(value string) []string {
+		return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, value)))
+	}
+
 	if cfg.maskBody {
-		return append(args, "--data-raw", escape(cfg.style, "[CONTENT MASKED]"))
+		return appendData("[CONTENT MASKED]")
 	}
 
 	body := data.body.String()
 
 	if len(cfg.maskedJSONFields) > 0 {
 		if data.bodyTruncated {
-			return append(args, "--data-raw", escape(cfg.style, "[CONTENT MASKED: invalid or truncated JSON]"))
+			return appendData("[CONTENT MASKED: invalid or truncated JSON]")
 		}
 
 		maskedBody, err := maskJSONContent(body, cfg.maskedJSONFields)
 		if err != nil {
-			return append(args, "--data-raw", escape(cfg.style, "[CONTENT MASKED: invalid or truncated JSON]"))
+			return appendData("[CONTENT MASKED: invalid or truncated JSON]")
 		}
 
-		return append(args, "--data-raw", escape(cfg.style, maskedBody))
+		return appendData(maskedBody)
 	}
 
 	// Add the marker if the body was truncated
@@ -315,7 +342,7 @@ func buildData(args []string, cfg config, data requestData) []string {
 		}
 	}
 
-	return append(args, "--data-raw", escape(cfg.style, body))
+	return appendData(body)
 }
 
 // buildMethod adds the -X flag if it is not a cURL default.
@@ -333,7 +360,9 @@ func buildMethod(args []string, cfg config, data requestData) []string {
 	isPostDefault := method == http.MethodPost && data.hasData
 
 	if !isGetDefault && !isPostDefault {
-		args = append(args, optionForm(cfg.style, "-X", "--request"), escape(cfg.style, method))
+		flag := optionForm(cfg.style, "-X", "--request")
+		val := escape(cfg.style, method)
+		args = append(args, fmt.Sprintf("%s %s", flag, val))
 	}
 
 	return args
@@ -406,14 +435,6 @@ func buildHeaders(cfg config, data requestData, handledHeaders map[string]bool) 
 	return headerTokens
 }
 
-// assembleTokens constructs the final c.tokens slice.
-func assembleTokens(mainArgs, headerArgs []string) []string {
-	mainCmd := strings.Join(mainArgs, " ")
-	tokens := []string{mainCmd}
-	tokens = append(tokens, headerArgs...)
-	return tokens
-}
-
 // optionForm returns the correct form based on config.
 func optionForm(style outputStyle, short, long string) string {
 	if style.useLongForm {
@@ -484,16 +505,16 @@ func maskJSONFields(data interface{}, fields map[string]struct{}) {
 // escape sanitizes the string based on the configured shell type.
 func escape(style outputStyle, s string) string {
 	switch style.shell {
-	case shellPowerShell:
+	case PowerShell:
 		return escapePowerShell(s)
-	case shellWindowsCMD:
+	case WindowsCMD:
 		return escapeWindowsCMD(s)
 	default:
 		return escapeUnix(style, s)
 	}
 }
 
-// escapeUnix handles escaping for Bash/Zsh/Unix shells.
+// escapeUnix handles escaping for Bash/Zsh/POSIX shells.
 func escapeUnix(style outputStyle, s string) string {
 	if style.useDoubleQuotes {
 		// Bash Double Quotes: escape \ " ` $

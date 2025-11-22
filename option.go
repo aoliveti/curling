@@ -5,16 +5,16 @@ import (
 )
 
 const (
-	// shellUnix targets Unix-like shells (Bash, Zsh, Sh).
-	shellUnix shellType = iota
-	// shellPowerShell targets Windows PowerShell.
-	shellPowerShell
-	// shellWindowsCMD targets the classic Windows Command Prompt.
-	shellWindowsCMD
+	// POSIX targets Unix-like shells (Bash, Zsh, Sh).
+	POSIX Shell = iota
+	// PowerShell targets Windows PowerShell.
+	PowerShell
+	// WindowsCMD targets the classic Windows Command Prompt.
+	WindowsCMD
 )
 
 const (
-	// lineContinuationDefault is the default line continuation character (Unix-like).
+	// lineContinuationDefault is the default line continuation character (POSIX-like).
 	lineContinuationDefault = "\\"
 	// lineContinuationWindows is the line continuation character for Windows CMD.
 	lineContinuationWindows = "^"
@@ -25,7 +25,7 @@ const (
 	defaultMaxBodySize = 1024
 )
 
-type shellType int
+type Shell int
 
 // config holds all user-configurable settings.
 type config struct {
@@ -54,7 +54,7 @@ type outputStyle struct {
 	useDoubleQuotes  bool
 	lineContinuation string
 	// shell determines the escaping rules to apply.
-	shell shellType
+	shell Shell
 }
 
 // curlFlags groups common boolean cURL flags.
@@ -107,37 +107,34 @@ func WithSilent() Option {
 }
 
 // WithMultiLine splits the command across multiple lines.
-// The default line continuation character is backslash (\).
 func WithMultiLine() Option {
 	return func(c *Command) {
 		c.cfg.style.useMultiLine = true
-		c.cfg.style.lineContinuation = lineContinuationDefault
-		c.cfg.style.shell = shellUnix
 	}
 }
 
-// WithWindowsMultiLine splits the command across multiple lines.
-// The line continuation character is caret (^).
-func WithWindowsMultiLine() Option {
+// WithTargetShell sets the target shell syntax (POSIX, PowerShell, WindowsCMD).
+// It configures the correct escaping rules and line continuation character.
+// Defaults to POSIX.
+func WithTargetShell(shell Shell) Option {
 	return func(c *Command) {
-		c.cfg.style.useMultiLine = true
-		c.cfg.style.lineContinuation = lineContinuationWindows
-		c.cfg.style.shell = shellWindowsCMD
-	}
-}
-
-// WithPowerShellMultiLine splits the command across multiple lines.
-// The line continuation character is backtick (`).
-func WithPowerShellMultiLine() Option {
-	return func(c *Command) {
-		c.cfg.style.useMultiLine = true
-		c.cfg.style.lineContinuation = lineContinuationPowerShell
-		c.cfg.style.shell = shellPowerShell
+		switch shell {
+		case PowerShell:
+			c.cfg.style.lineContinuation = lineContinuationPowerShell
+			c.cfg.style.shell = PowerShell
+		case WindowsCMD:
+			c.cfg.style.lineContinuation = lineContinuationWindows
+			c.cfg.style.shell = WindowsCMD
+		default:
+			c.cfg.style.lineContinuation = lineContinuationDefault
+			c.cfg.style.shell = POSIX
+		}
 	}
 }
 
 // WithDoubleQuotes enables escaping using double quotes (").
 // The default is single quotes (').
+// Only for POSIX shells.
 func WithDoubleQuotes() Option {
 	return func(c *Command) {
 		c.cfg.style.useDoubleQuotes = true

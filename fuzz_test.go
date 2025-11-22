@@ -68,9 +68,9 @@ func Fuzz_NewFromRequest(f *testing.F) {
 		case 1:
 			opts = append(opts, WithMultiLine())
 		case 2:
-			opts = append(opts, WithWindowsMultiLine())
+			opts = append(opts, WithTargetShell(WindowsCMD))
 		case 3:
-			opts = append(opts, WithPowerShellMultiLine())
+			opts = append(opts, WithTargetShell(PowerShell))
 		}
 
 		// Enable Double Quotes if the fifth bit is set.
