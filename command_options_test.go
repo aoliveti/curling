@@ -165,7 +165,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithMultiLine()},
 			},
-			want:    "curl 'https://localhost/test'",
+			want:    "curl \\\n  'https://localhost/test'",
 			wantErr: assert.NoError,
 		},
 		{
@@ -178,7 +178,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 				},
 				opts: []Option{WithDoubleQuotes()},
 			},
-			want:    "curl --data-raw \"Hello!\" \"https://localhost/test\"",
+			want:    `curl --data-raw "Hello!" "https://localhost/test"`,
 			wantErr: assert.NoError,
 		},
 		{
@@ -189,9 +189,9 @@ func Test_NewFromRequest_options(t *testing.T) {
 					URL:    testUrl,
 					Body:   io.NopCloser(strings.NewReader("")),
 				},
-				opts: []Option{WithWindowsMultiLine()},
+				opts: []Option{WithTargetShell(WindowsCMD)},
 			},
-			want:    "curl --data-raw \"\" \"https://localhost/test\"",
+			want:    `curl --data-raw "" "https://localhost/test"`,
 			wantErr: assert.NoError,
 		},
 		{
@@ -200,11 +200,11 @@ func Test_NewFromRequest_options(t *testing.T) {
 				r: &http.Request{
 					Method: http.MethodPost,
 					URL:    testUrl,
-					Body:   io.NopCloser(strings.NewReader(`C:\Windows\System32`)),
+					Body:   io.NopCloser(strings.NewReader(`C:\Windows\Path`)),
 				},
-				opts: []Option{WithWindowsMultiLine()},
+				opts: []Option{WithTargetShell(WindowsCMD)},
 			},
-			want:    "curl --data-raw \"C:\\Windows\\System32\" \"https://localhost/test\"",
+			want:    `curl --data-raw "C:\Windows\Path" "https://localhost/test"`,
 			wantErr: assert.NoError,
 		},
 		{
@@ -215,7 +215,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 					URL:    testUrl,
 					Body:   io.NopCloser(strings.NewReader(`Folder\`)),
 				},
-				opts: []Option{WithWindowsMultiLine()},
+				opts: []Option{WithTargetShell(WindowsCMD)},
 			},
 			want:    `curl --data-raw "Folder\\" "https://localhost/test"`,
 			wantErr: assert.NoError,
@@ -228,7 +228,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 					URL:    testUrl,
 					Body:   io.NopCloser(strings.NewReader(`path=\"`)),
 				},
-				opts: []Option{WithWindowsMultiLine()},
+				opts: []Option{WithTargetShell(WindowsCMD)},
 			},
 			want:    `curl --data-raw "path=\\\"" "https://localhost/test"`,
 			wantErr: assert.NoError,
@@ -242,7 +242,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 					// Input: Two backslashes before a quote: \\"
 					Body: io.NopCloser(strings.NewReader(`Wait\\"`)),
 				},
-				opts: []Option{WithWindowsMultiLine()},
+				opts: []Option{WithTargetShell(WindowsCMD)},
 			},
 			want:    `curl --data-raw "Wait\\\\\"" "https://localhost/test"`,
 			wantErr: assert.NoError,
@@ -253,9 +253,9 @@ func Test_NewFromRequest_options(t *testing.T) {
 				r: &http.Request{
 					URL: testUrl,
 				},
-				opts: []Option{WithWindowsMultiLine()},
+				opts: []Option{WithTargetShell(WindowsCMD), WithMultiLine(), WithDoubleQuotes()},
 			},
-			want:    "curl \"https://localhost/test\"",
+			want:    "curl ^\n  \"https://localhost/test\"",
 			wantErr: assert.NoError,
 		},
 		{
@@ -264,7 +264,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 				r: &http.Request{
 					URL: testUrl,
 				},
-				opts: []Option{WithWindowsMultiLine(), WithDoubleQuotes()},
+				opts: []Option{WithTargetShell(WindowsCMD), WithDoubleQuotes()},
 			},
 			want:    "curl \"https://localhost/test\"",
 			wantErr: assert.NoError,
@@ -275,13 +275,26 @@ func Test_NewFromRequest_options(t *testing.T) {
 				r: &http.Request{
 					Method: http.MethodPost,
 					URL:    testUrl,
-					// Body contains: $cost = "100"
-					Body: io.NopCloser(strings.NewReader(`$cost = "100"`)),
+					Body:   io.NopCloser(strings.NewReader(`$cost = "100"`)),
 				},
-				opts: []Option{WithPowerShellMultiLine(), WithDoubleQuotes()},
+				opts: []Option{WithTargetShell(PowerShell)},
 			},
 			// PowerShell uses backtick (`) to escape $ and " inside double-quoted strings
 			want:    "curl --data-raw \"`$cost = `\"100`\"\" \"https://localhost/test\"",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "powershell double quotes escaping with multiline",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`$cost = "100"`)),
+				},
+				opts: []Option{WithTargetShell(PowerShell), WithMultiLine()},
+			},
+			// PowerShell uses backtick (`) to escape $ and " inside double-quoted strings
+			want:    "curl `\n  --data-raw \"`$cost = `\"100`\"\" `\n  \"https://localhost/test\"",
 			wantErr: assert.NoError,
 		},
 		{
@@ -293,7 +306,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 					// Body contains a literal backtick: cmd `exec`
 					Body: io.NopCloser(strings.NewReader("cmd `exec`")),
 				},
-				opts: []Option{WithPowerShellMultiLine(), WithDoubleQuotes()},
+				opts: []Option{WithTargetShell(PowerShell)},
 			},
 			// The backtick itself must be escaped with another backtick (``)
 			want:    "curl --data-raw \"cmd ``exec``\" \"https://localhost/test\"",
@@ -357,6 +370,7 @@ func Test_NewFromRequest_options(t *testing.T) {
 					Body: io.NopCloser(strings.NewReader("data")),
 				},
 				opts: []Option{
+					WithTargetShell(POSIX),
 					WithFollowRedirects(),
 					WithCompression(),
 					WithInsecure(),
