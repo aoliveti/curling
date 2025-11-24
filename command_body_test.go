@@ -2,6 +2,7 @@ package curling
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,6 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type errReader struct{}
+
+func (e *errReader) Read(_ []byte) (n int, err error) {
+	return 0, assert.AnError
+}
 
 func Test_NewFromRequest_body(t *testing.T) {
 	t.Parallel()
@@ -380,6 +387,71 @@ func Test_NewFromRequest_body(t *testing.T) {
 			want:    "curl --data-raw '[CONTENT MASKED: invalid or truncated JSON]' 'https://localhost/test'",
 			wantErr: assert.NoError,
 		},
+		{
+			name: "body with image/jpeg content type is omitted",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("binary-jpeg-data")),
+					Header: http.Header{"Content-Type": {"image/jpeg"}},
+				},
+			},
+			want:    "curl --data-raw '[BINARY DATA OMITTED: image/jpeg]' 'https://localhost/test' -H 'Content-Type: image/jpeg'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "body with application/octet-stream content type is omitted",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("raw-binary-stream")),
+					Header: http.Header{"Content-Type": {"application/octet-stream"}},
+				},
+			},
+			want:    "curl --data-raw '[BINARY DATA OMITTED: application/octet-stream]' 'https://localhost/test' -H 'Content-Type: application/octet-stream'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "body with application/zip content type is omitted",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("zip-archive")),
+					Header: http.Header{"Content-Type": {"application/zip"}},
+				},
+			},
+			want:    "curl --data-raw '[BINARY DATA OMITTED: application/zip]' 'https://localhost/test' -H 'Content-Type: application/zip'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "body with text/plain content type is not omitted",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("text data")),
+					Header: http.Header{"Content-Type": {"text/plain"}},
+				},
+			},
+			want:    "curl --data-raw 'text data' 'https://localhost/test' -H 'Content-Type: text/plain'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "body with Content-Encoding gzip is omitted, overriding Content-Type",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`{"status": "ok"}`)),
+					Header: http.Header{"Content-Type": {"application/json"}, "Content-Encoding": {"gzip"}},
+				},
+			},
+			want:    "curl --data-raw '[ENCODED DATA OMITTED: Content-Encoding: gzip]' 'https://localhost/test' -H 'Content-Encoding: gzip' -H 'Content-Type: application/json'",
+			wantErr: assert.NoError,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -394,6 +466,61 @@ func Test_NewFromRequest_body(t *testing.T) {
 			assert.Equal(t, tt.want, got.String())
 		})
 	}
+}
+
+func TestNewFromRequest_GetBody_Success(t *testing.T) {
+	t.Parallel()
+
+	payload := "fast-path-data"
+	req, err := http.NewRequest(http.MethodPost, "https://localhost/test", strings.NewReader(payload))
+	require.NoError(t, err)
+
+	cmd, err := NewFromRequest(req)
+	require.NoError(t, err)
+	assert.Contains(t, cmd.String(), fmt.Sprintf("--data-raw '%s'", payload))
+}
+
+func TestNewFromRequest_GetBody_Truncation(t *testing.T) {
+	t.Parallel()
+	payload := "1234567890"
+	req, err := http.NewRequest(http.MethodPost, "https://localhost/test", strings.NewReader(payload))
+	require.NoError(t, err)
+
+	cmd, err := NewFromRequest(req, WithMaxBodySize(5))
+	require.NoError(t, err)
+	assert.Contains(t, cmd.String(), "--data-raw '12345... (truncated body, total 10 bytes)'")
+}
+
+func TestNewFromRequest_GetBody_Failure_Fallback(t *testing.T) {
+	t.Parallel()
+	payload := "data-via-fallback"
+	req, err := http.NewRequest(http.MethodPost, "https://localhost/test", strings.NewReader(payload))
+	require.NoError(t, err)
+
+	req.GetBody = func() (io.ReadCloser, error) {
+		return nil, assert.AnError
+	}
+
+	cmd, err := NewFromRequest(req)
+	require.NoError(t, err)
+	assert.Contains(t, cmd.String(), fmt.Sprintf("--data-raw '%s'", payload))
+
+	restored, _ := io.ReadAll(req.Body)
+	assert.Equal(t, payload, string(restored))
+}
+
+func TestNewFromRequest_GetBody_ReadError(t *testing.T) {
+	t.Parallel()
+	req, err := http.NewRequest(http.MethodPost, "https://localhost/test", strings.NewReader("ok"))
+	require.NoError(t, err)
+
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(&errReader{}), nil
+	}
+
+	cmd, err := NewFromRequest(req)
+	require.Nil(t, err)
+	assert.Contains(t, cmd.String(), "--data-raw 'ok'")
 }
 
 func TestNewFromRequest_BodyRestoration(t *testing.T) {
