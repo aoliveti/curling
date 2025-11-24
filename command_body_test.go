@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,10 +15,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testMultipartBoundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+
 type errReader struct{}
 
 func (e *errReader) Read(_ []byte) (n int, err error) {
 	return 0, assert.AnError
+}
+
+// createMultipartBody creates a sample body with text and file parts for testing.
+func createMultipartBody(t *testing.T, textValue, fileName string) *bytes.Buffer {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	err := writer.SetBoundary(testMultipartBoundary)
+	require.NoError(t, err)
+
+	// Text Field part
+	w, err := writer.CreateFormField("username")
+	require.NoError(t, err)
+	_, _ = w.Write([]byte(textValue))
+
+	// File Field part
+	w, err = writer.CreateFormFile("avatar", fileName)
+	require.NoError(t, err)
+	_, _ = w.Write([]byte("file-content-mock"))
+
+	require.NoError(t, writer.Close())
+	return &body
 }
 
 func Test_NewFromRequest_body(t *testing.T) {
@@ -90,6 +114,56 @@ func Test_NewFromRequest_body(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
+			name: "method: DELETE generates -X flag",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodDelete,
+					URL:    testUrl,
+					Body:   http.NoBody,
+				},
+			},
+			want:    "curl -X 'DELETE' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "method: PATCH with body generates -X flag",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPatch,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`{"op":"replace"}`)),
+				},
+			},
+			want:    "curl --data-raw '{\"op\":\"replace\"}' -X 'PATCH' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "binary: prefix match for video/webm",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("video-data")),
+					Header: http.Header{"Content-Type": {"video/webm"}},
+				},
+			},
+			want:    "curl --data-raw '[BINARY DATA OMITTED: video/webm]' 'https://localhost/test' -H 'Content-Type: video/webm'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "binary: exact match for application/x-tar",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("tar-data")),
+					Header: http.Header{"Content-Type": {"application/x-tar"}},
+				},
+			},
+			want:    "curl --data-raw '[BINARY DATA OMITTED: application/x-tar]' 'https://localhost/test' -H 'Content-Type: application/x-tar'",
+			wantErr: assert.NoError,
+		},
+		{
 			name: "masked body option",
 			args: args{
 				r: &http.Request{
@@ -100,6 +174,19 @@ func Test_NewFromRequest_body(t *testing.T) {
 				opts: []Option{WithMaskedBody()},
 			},
 			want:    "curl --data-raw '[CONTENT MASKED]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "json: invalid syntax triggers fallback masking",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader(`{"key": "val"`)),
+				},
+				opts: []Option{WithMaskedJSONFields("key")},
+			},
+			want:    "curl --data-raw '[CONTENT MASKED: invalid or truncated JSON]' 'https://localhost/test'",
 			wantErr: assert.NoError,
 		},
 		{
@@ -452,6 +539,59 @@ func Test_NewFromRequest_body(t *testing.T) {
 			want:    "curl --data-raw '[ENCODED DATA OMITTED: Content-Encoding: gzip]' 'https://localhost/test' -H 'Content-Encoding: gzip' -H 'Content-Type: application/json'",
 			wantErr: assert.NoError,
 		},
+		{
+			name: "form: basic urlencoded data conversion to -d",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("user=alice&id=101")),
+					Header: http.Header{"Content-Type": {"application/x-www-form-urlencoded"}},
+				},
+			},
+			want:    "curl -d 'id=101' -d 'user=alice' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "form: multiple values for a single key",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("role=admin&role=guest")),
+					Header: http.Header{"Content-Type": {"application/x-www-form-urlencoded"}},
+				},
+			},
+			want:    "curl -d 'role=admin' -d 'role=guest' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "form: truncated body forces masked form message",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("key=value")),
+					Header: http.Header{"Content-Type": {"application/x-www-form-urlencoded"}},
+				},
+				opts: []Option{WithMaxBodySize(3)},
+			},
+			want:    "curl --data-raw '[FORM DATA OMITTED: body truncated]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "form: invalid format parsing fails secure",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("a=1&b%")),
+					Header: http.Header{"Content-Type": {"application/x-www-form-urlencoded"}},
+				},
+			},
+			want:    "curl --data-raw '[FORM DATA ERROR: Invalid query format]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -598,4 +738,199 @@ func TestNewFromRequest_BodyRestoration_Masked(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, originalData, restoredBody)
+}
+
+func TestNewFromRequest_MultipartBody(t *testing.T) {
+	t.Parallel()
+
+	testUrl := &url.URL{
+		Scheme: "https",
+		Host:   "localhost",
+		Path:   "test",
+	}
+
+	type args struct {
+		r    *http.Request
+		opts []Option
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "multipart: success with text and file placeholder",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(createMultipartBody(t, "Alice", "photo.jpg")),
+					Header: http.Header{"Content-Type": {"multipart/form-data; boundary=" + testMultipartBoundary}},
+				},
+			},
+			want:    "curl -F 'avatar=@photo.jpg (OMITTED)' -F 'username=Alice' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "multipart: body truncated (fail-secure)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(createMultipartBody(t, "Alice", "photo.jpg")),
+					Header: http.Header{"Content-Type": {"multipart/form-data; boundary=" + testMultipartBoundary}},
+				},
+				opts: []Option{WithMaxBodySize(10)},
+			},
+			want:    "curl --data-raw '[MULTIPART OMITTED: body truncated]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "multipart: boundary missing in header (parsing error)",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(createMultipartBody(t, "Bob", "doc.pdf")),
+					Header: http.Header{"Content-Type": {"multipart/form-data"}},
+				},
+			},
+			want:    "curl --data-raw '[MULTIPART ERROR: boundary missing]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "multipart: incomplete final boundary causes read part error",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("--" + testMultipartBoundary + "\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nvalue")),
+					Header: http.Header{"Content-Type": {"multipart/form-data; boundary=" + testMultipartBoundary}},
+				},
+			},
+			want:    "curl --data-raw '[MULTIPART ERROR: failed to read part]' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+		{
+			name: "multipart: missing part header parses with empty key",
+			args: args{
+				r: &http.Request{
+					Method: http.MethodPost,
+					URL:    testUrl,
+					Body:   io.NopCloser(strings.NewReader("--" + testMultipartBoundary + "\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nvalue\r\n--" + testMultipartBoundary + "\r\n\r\nvalue2\r\n--" + testMultipartBoundary + "--")),
+					Header: http.Header{"Content-Type": {"multipart/form-data; boundary=" + testMultipartBoundary}},
+				},
+			},
+			want:    "curl -F '=value2' -F 'a=value' 'https://localhost/test'",
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd, err := NewFromRequest(tt.args.r, tt.args.opts...)
+
+			if !tt.wantErr(t, err, "NewFromRequest() error") {
+				return
+			}
+
+			assert.Equal(t, tt.want, cmd.String())
+		})
+	}
+}
+
+func TestBuildMultipartFormData_Internal_Errors(t *testing.T) {
+	t.Parallel()
+
+	boundary := "testboundary"
+	validContentType := "multipart/form-data; boundary=" + boundary
+
+	cfg := config{
+		style: outputStyle{
+			shell:            POSIX,
+			lineContinuation: "\\",
+		},
+	}
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "force NextPart error (parsing failed)",
+			body: "--" + boundary + "\r\nInvalid-Header-Format-No-Colon\r\n\r\nData",
+			want: "curl --data-raw '[MULTIPART ERROR: parsing failed]'",
+		},
+		{
+			name: "force ReadAll error (failed to read part)",
+			body: "--" + boundary + "\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nTruncatedValue",
+			want: "curl --data-raw '[MULTIPART ERROR: failed to read part]'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("POST", "http://localhost", nil)
+			req.Header.Set("Content-Type", validContentType)
+
+			data := requestData{
+				request: req,
+				body:    bytes.NewBufferString(tt.body),
+				hasData: true,
+			}
+
+			handledHeaders := make(map[string]bool)
+
+			gotSlice := buildMultipartFormData([]string{"curl"}, cfg, data, handledHeaders)
+			got := strings.Join(gotSlice, " ")
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestBuildMultipartFormData_Initialization_Errors(t *testing.T) {
+	t.Parallel()
+
+	cfg := config{
+		style: outputStyle{shell: POSIX},
+	}
+
+	tests := []struct {
+		name        string
+		contentType string
+		want        string
+	}{
+		{
+			name:        "invalid content type structure",
+			contentType: "multipart/form-data boundary=wrong",
+			want:        "curl --data-raw '[MULTIPART ERROR: invalid Content-Type]'",
+		},
+		{
+			name:        "missing boundary parameter",
+			contentType: "multipart/form-data",
+			want:        "curl --data-raw '[MULTIPART ERROR: boundary missing]'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("POST", "http://localhost", nil)
+			req.Header.Set("Content-Type", tt.contentType)
+
+			data := requestData{
+				request: req,
+				body:    bytes.NewBufferString(""),
+				hasData: true,
+			}
+
+			gotSlice := buildMultipartFormData([]string{"curl"}, cfg, data, make(map[string]bool))
+			got := strings.Join(gotSlice, " ")
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

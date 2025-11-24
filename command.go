@@ -7,10 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -120,8 +121,8 @@ func (d *requestData) extractCookies(r *http.Request) {
 	d.hasCookies = true
 
 	// Sort cookies by name for deterministic output.
-	sort.Slice(cookies, func(i, j int) bool {
-		return cookies[i].Name < cookies[j].Name
+	slices.SortFunc(cookies, func(a, b *http.Cookie) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	var cookieParts []string
@@ -281,7 +282,7 @@ func (c *Command) compile() {
 	commandParts = buildOptions(commandParts, c.cfg, c.data)
 	commandParts = buildAuth(commandParts, c.cfg, c.data, handledHeaders)
 	commandParts = buildCookies(commandParts, c.cfg, c.data, handledHeaders)
-	commandParts = buildData(commandParts, c.cfg, c.data)
+	commandParts = buildData(commandParts, c.cfg, c.data, handledHeaders)
 	commandParts = buildMethod(commandParts, c.cfg, c.data)
 	commandParts = buildURL(commandParts, c.cfg, c.data)
 
@@ -385,43 +386,54 @@ func buildCookies(args []string, cfg config, data requestData, handledHeaders ma
 }
 
 // buildData adds the --data-raw flag if data exists.
-func buildData(args []string, cfg config, data requestData) []string {
+func buildData(args []string, cfg config, data requestData, handledHeaders map[string]bool) []string {
 	// We only add the flag if a body was present (even if empty).
 	if !data.hasData {
 		return args
 	}
 
-	appendData := func(value string) []string {
-		return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, value)))
-	}
-
 	if cfg.maskBody {
-		return appendData("[CONTENT MASKED]")
+		return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, "[CONTENT MASKED]")))
 	}
 
 	contentEncoding := data.request.Header.Get("Content-Encoding")
-	if contentEncoding != "" && contentEncoding != "identity" {
-		return appendData(fmt.Sprintf("[ENCODED DATA OMITTED: Content-Encoding: %s]", contentEncoding))
+	if contentEncoding != "" && !strings.EqualFold(contentEncoding, "identity") {
+		msg := fmt.Sprintf("[ENCODED DATA OMITTED: Content-Encoding: %s]", contentEncoding)
+		return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, msg)))
 	}
 
 	contentType := data.request.Header.Get("Content-Type")
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+
+	// If it is form-urlencoded, parse the content and convert it to multiple -d flags.
+	if mediaType == "application/x-www-form-urlencoded" {
+		return buildFormURLEncoded(args, cfg, data, handledHeaders)
+	}
+
+	// If it is multipart/form-data, parse the content and convert it to multiple -F flags.
+	if mediaType == "multipart/form-data" {
+		return buildMultipartFormData(args, cfg, data, handledHeaders)
+	}
+
 	if isBinaryType(contentType) {
-		return appendData(fmt.Sprintf("[BINARY DATA OMITTED: %s]", contentType))
+		msg := fmt.Sprintf("[BINARY DATA OMITTED: %s]", contentType)
+		return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, msg)))
 	}
 
 	body := data.body.String()
 
+	// JSON masking
 	if len(cfg.maskedJSONFields) > 0 {
 		if data.bodyTruncated {
-			return appendData("[CONTENT MASKED: invalid or truncated JSON]")
+			return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, "[CONTENT MASKED: invalid or truncated JSON]")))
 		}
 
 		maskedBody, err := maskJSONContent(body, cfg.maskedJSONFields)
 		if err != nil {
-			return appendData("[CONTENT MASKED: invalid or truncated JSON]")
+			return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, "[CONTENT MASKED: invalid or truncated JSON]")))
 		}
 
-		return appendData(maskedBody)
+		return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, maskedBody)))
 	}
 
 	// Add the marker if the body was truncated
@@ -433,7 +445,7 @@ func buildData(args []string, cfg config, data requestData) []string {
 		}
 	}
 
-	return appendData(body)
+	return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, body)))
 }
 
 // buildMethod adds the -X flag if it is not a cURL default.
@@ -548,6 +560,120 @@ func sanitizeHeaderValue(cfg config, key, value string) string {
 	}
 
 	return value
+}
+
+// buildFormURLEncoded parses application/x-www-form-urlencoded content and converts it into multiple -d / --data flags
+func buildFormURLEncoded(args []string, cfg config, data requestData, handledHeaders map[string]bool) []string {
+	// Mark Content-Type as handled because cURL will generate it automatically with -d.
+	handledHeaders["Content-Type"] = true
+
+	// If the body was truncated, we cannot safely parse the form data.
+	// We mask the content to avoid printing corrupted form data.
+	if data.bodyTruncated {
+		return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, "[FORM DATA OMITTED: body truncated]")))
+	}
+
+	body := data.body.String()
+
+	values, err := url.ParseQuery(body)
+	if err != nil {
+		return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, "[FORM DATA ERROR: Invalid query format]")))
+	}
+
+	dataParts := make([]string, 0, len(values)*2)
+
+	// Keys are needed to ensure deterministic output order.
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+
+	for _, key := range keys {
+		vals := values[key]
+		// Handle multiple values for the same key (e.g., checkbox lists)
+		for _, val := range vals {
+			// -d / --data is the flag for form content
+			flag := optionForm(cfg.style, "-d", "--data")
+
+			// The key=value pair must be sent as a single string argument.
+			formPart := fmt.Sprintf("%s=%s", key, val)
+
+			// Escape only the combined string argument.
+			dataParts = append(dataParts, flag, escape(cfg.style, formPart))
+		}
+	}
+
+	// Append all generated -d flags to the command
+	return append(args, dataParts...)
+}
+
+// buildMultipartFormData parses multipart/form-data content and converts it into multiple -F / --form flags
+func buildMultipartFormData(args []string, cfg config, data requestData, handledHeaders map[string]bool) []string {
+	// Mark Content-Type as handled because cURL will generate it automatically with -F.
+	handledHeaders["Content-Type"] = true
+
+	// If the body is truncated, parsing is impossible/unreliable.
+	if data.bodyTruncated {
+		formattedValue := fmt.Sprintf("--data-raw %s", escape(cfg.style, "[MULTIPART OMITTED: body truncated]"))
+		return append(args, formattedValue)
+	}
+
+	contentTypeHeader := data.request.Header.Get("Content-Type")
+
+	// Extract boundary from the Content-Type header
+	_, params, err := mime.ParseMediaType(contentTypeHeader)
+	if err != nil {
+		formattedValue := fmt.Sprintf("--data-raw %s", escape(cfg.style, "[MULTIPART ERROR: invalid Content-Type]"))
+		return append(args, formattedValue)
+	}
+
+	boundary := params["boundary"]
+	if boundary == "" {
+		formattedValue := fmt.Sprintf("--data-raw %s", escape(cfg.style, "[MULTIPART ERROR: boundary missing]"))
+		return append(args, formattedValue)
+	}
+
+	// Use the full body buffer to create a multipart reader
+	reader := multipart.NewReader(data.body, boundary)
+	var formValues []string
+	for {
+		part, err := reader.NextPart()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, "[MULTIPART ERROR: parsing failed]")))
+		}
+
+		partData, err := io.ReadAll(part)
+		if err != nil {
+			return append(args, fmt.Sprintf("--data-raw %s", escape(cfg.style, "[MULTIPART ERROR: failed to read part]")))
+		}
+
+		var formValue string
+		formName := part.FormName()
+
+		if part.FileName() != "" {
+			// File upload (Cannot reproduce path, so we use a placeholder)
+			formValue = fmt.Sprintf("%s=@%s (OMITTED)", formName, part.FileName())
+		} else {
+			// Text field
+			formValue = fmt.Sprintf("%s=%s", formName, string(partData))
+		}
+
+		formValues = append(formValues, formValue)
+	}
+
+	slices.Sort(formValues)
+
+	var formTokens []string
+	for _, formValue := range formValues {
+		formTokens = append(formTokens, optionForm(cfg.style, "-F", "--form"), escape(cfg.style, formValue))
+	}
+
+	return append(args, formTokens...)
 }
 
 // isBinaryType checks for common binary MIME types
