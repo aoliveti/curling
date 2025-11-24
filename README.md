@@ -15,32 +15,35 @@ It is designed for debugging, logging, and auditing HTTP requests in middleware 
 
 ## Why curling?
 
-* **Middleware Ready:** Automatically reconstructs URLs for server-side requests where Scheme and Host are missing, and handles multi-hop proxies (`X-Forwarded-Proto`).
-* **Secure by Default:** Prevents secrets leakage via robust masking options for headers, body, and specific JSON keys.
-* **Deterministic:** Sorts headers and cookies alphabetically, ensuring stable logs and reliable snapshot testing.
-* **Shell Aware:** Generates syntax-correct commands for Bash, PowerShell, and Windows CMD, handling complex escaping (e.g., nested quotes, JSON) correctly.
+* **URL reconstruction:** Rebuilds absolute URLs when `Scheme` and `Host` are empty (typical in server-side middleware), optionally supporting `X-Forwarded-Proto`.
+* **Non-destructive reading:** Uses `http.Request.GetBody` when available (client-side) to read the payload without the overhead of buffering and restoring `req.Body`.
+* **Form parsing:** Maps `application/x-www-form-urlencoded` bodies to `-d` flags and `multipart/form-data` to `-F` flags instead of dumping raw strings.
+* **Content sanitization:** Truncates large bodies, omits binary/compressed data, and masks configured headers or JSON fields.
+* **Deterministic output:** Sorts headers, cookies, and form keys alphabetically to ensure consistent output for logs and snapshot testing.
+* **Shell compatibility:** Generates syntax-correct commands for Bash, PowerShell, and Windows CMD, applying shell-specific escaping rules.
 
 ## Table of Contents
 
-* [Quick Start](#quick-start)
+* [Quick start](#quick-start)
 * [Features](#features)
 * [Examples](#examples)
-
-    * [1. Basic POST with Auth & Cookies](#1-basic-post-with-auth--cookies)
-    * [2. Multi-line Output for Logging](#2-multi-line-output-for-logging)
-    * [3. Masking JSON Keys](#3-masking-json-keys)
-    * [4. Env Vars Substitution](#4-env-vars-substitution)
-    * [5. Middleware: Server-side URL Reconstruction](#5-middleware-server-side-url-reconstruction)
+    * [1. Basic POST with auth & cookies](#1-basic-post-with-auth--cookies)
+    * [2. Multi-line output for logging](#2-multi-line-output-for-logging)
+    * [3. Masking JSON keys](#3-masking-json-keys)
+    * [4. Env vars substitution](#4-env-vars-substitution)
+    * [5. Middleware: Server-side URL reconstruction](#5-middleware-server-side-url-reconstruction)
+    * [6. Form data parsing](#6-form-data-parsing)
+    * [7. Multipart uploads](#7-multipart-uploads)
+    * [8. Binary and compressed content](#8-binary-and-compressed-content)
 * [Options](#options)
-
-    * [General Configuration](#general-configuration)
-    * [Shell & Formatting](#shell--formatting)
-    * [Privacy & Security](#privacy--security)
+    * [General configuration](#general-configuration)
+    * [Shell & formatting](#shell--formatting)
+    * [Privacy & security](#privacy--security)
 * [License](#license)
 
 ---
 
-## Quick Start
+## Quick start
 
 ```bash
 go get -u github.com/aoliveti/curling
@@ -54,13 +57,13 @@ package main
 import (
 	"fmt"
 	"net/http"
+
 	"github.com/aoliveti/curling"
 )
 
 func main() {
 	req, _ := http.NewRequest("GET", "https://api.example.com/status", nil)
 	
-	// Generate command with default options
 	cmd, _ := curling.NewFromRequest(req)
 	fmt.Println(cmd)
 }
@@ -70,15 +73,19 @@ func main() {
 
 ## Features
 
-* **Smart URL Handling:** Rebuilds absolute URLs for server-side requests and auto-disables globbing (`-g`) for IPv6 or array parameters.
-* **RFC Compliance:** Handles multi-value headers as separate flags (`-H "A: 1" -H "A: 2"`) and strictly prioritizes `r.Host` (RFC 7230).
-* **Safety:** Automatically removes `Content-Length` to prevent cURL errors and truncates request bodies (1KB default) to avoid OOM.
-* **Privacy & Security:** Supports masking headers (`*****`), specific JSON keys, or the entire body (`[CONTENT MASKED]`). Also supports environment variable substitution (`$VAR`).
-* **Formatting:** Converts Basic Auth to `-u`, Cookies to `-b`, and supports multi-line output with shell-specific escaping.
+* **URL reconstruction:** Rebuilds absolute URLs for server-side requests, prioritizing `X-Forwarded-Proto` (if enabled) and `r.Host`.
+* **Data parsing:**
+    * Parses `application/x-www-form-urlencoded` bodies into individual `-d` flags.
+    * Parses `multipart/form-data` bodies into `-F` flags, replacing file content with placeholders.
+* **Content safety:** Detects and omits binary media types (e.g., images, PDF) and compressed streams (`Content-Encoding: gzip`) to prevent terminal corruption.
+* **Performance:** Utilizes `http.Request.GetBody` when available to read the body without buffering overhead.
+* **RFC compliance:** Handles multi-value headers as separate flags and respects RFC 7230 Host prioritization.
+* **Redaction:** Supports masking of headers, specific JSON keys, or the entire request body.
+* **Shell compatibility:** Generates syntax for Bash, PowerShell, and Windows CMD.
 
 ## Examples
 
-### 1. Basic POST with Auth & Cookies
+### 1. Basic POST with auth & cookies
 
 ```go
 req, _ := http.NewRequest("POST", "https://api.example.com/test", strings.NewReader(`{"hello":"world"}`))
@@ -91,7 +98,7 @@ cmd, _ := curling.NewFromRequest(req)
 // curl -u 'user:pass' -b 'session=abc' --data-raw '{"hello":"world"}' 'https://api.example.com/test'
 ```
 
-### 2. Multi-line Output for Logging
+### 2. Multi-line output for logging
 
 Generate readable commands for log files using `WithMultiLine()`.
 
@@ -103,7 +110,7 @@ cmd, _ := curling.NewFromRequest(req, curling.WithMultiLine())
 cmd, _ := curling.NewFromRequest(req, curling.WithMultiLine(), curling.WithTargetShell(curling.PowerShell))
 ```
 
-### 3. Masking JSON Keys
+### 3. Masking JSON keys
 
 Granularly redact sensitive fields inside a JSON body while keeping the structure for debugging.
 
@@ -115,7 +122,7 @@ cmd, _ := curling.NewFromRequest(req, curling.WithMaskedJSONFields("password"))
 // curl ... --data-raw '{"user":"admin","password":"*****"}'
 ```
 
-### 4. Env Vars Substitution
+### 4. Env vars substitution
 
 Generate shareable commands using shell variables instead of hardcoded secrets.
 
@@ -127,7 +134,7 @@ cmd, _ := curling.NewFromRequest(req, curling.WithEnvVar("Authorization", "$API_
 // curl ... -H 'Authorization: $API_TOKEN'
 ```
 
-### 5. Middleware: Server-side URL Reconstruction
+### 5. Middleware: Server-side URL reconstruction
 
 When used in middleware, `http.Request` often lacks Scheme and Host. `curling` reconstructs the URL using the following logic:
 
@@ -137,31 +144,63 @@ When used in middleware, `http.Request` often lacks Scheme and Host. `curling` r
     * Otherwise, detects `https` via `r.TLS`.
 * **Host**: Prioritizes `r.Host`, falling back to `r.URL.Host`.
 
+### 6. Form data parsing
+
+Parses `application/x-www-form-urlencoded` into `-d` flags.
+
+```go
+// req is a POST with Content-Type: application/x-www-form-urlencoded
+// Body: "q=golang&sort=desc"
+cmd, _ := curling.NewFromRequest(req)
+
+// Output:
+// curl -d 'q=golang' -d 'sort=desc' 'https://api.example.com/search'
+```
+
+### 7. Multipart uploads
+
+Converts `multipart/form-data` payloads into `-F` flags. File content is omitted with a placeholder.
+
+```go
+// req is a multipart request containing:
+// - Text field "username": "alice"
+// - File field "avatar": filename "avatar.jpg"
+cmd, _ := curling.NewFromRequest(req)
+
+// Output:
+// curl -F 'avatar=@avatar.jpg (OMITTED)' -F 'username=alice' 'https://api.example.com/upload'
+```
+
+### 8. Binary and compressed content
+
+Safe logging for binary streams (image/*, application/pdf) or compressed bodies (gzip).
+
+```go
+// Scenario A: req has header "Content-Encoding: gzip"
+cmd, _ := curling.NewFromRequest(req)
+// Output: curl ... --data-raw '[ENCODED DATA OMITTED: Content-Encoding: gzip]' ...
+
+// Scenario B: req has header "Content-Type: image/jpeg"
+cmd, _ := curling.NewFromRequest(req)
+// Output: curl ... --data-raw '[BINARY DATA OMITTED: image/jpeg]' ...
+```
+
 ## Options
 
-### General Configuration
+### General configuration
 
-| Option                            | Description                                                    |
-|-----------------------------------|----------------------------------------------------------------|
-| `WithLongForm()`                  | Use long-form cURL options (e.g., `--request` instead of `-X`) |
-| `WithSilent()`                    | Set the flag `-s`, `--silent`                                  |
-| `WithCompression()`               | Set the flag `--compressed`                                    |
-| `WithFollowRedirects()`           | Set the flag `-L`, `--location`                                |
-| `WithInsecure()`                  | Set the flag `-k`, `--insecure`                                |
-| `WithRequestTimeout(seconds int)` | Set the flag `-m`, `--max-time`                                |
-| `WithMaxBodySize(bytes int)`      | Override the default 1KB body read limit                       |
-| `WithTrustProxy()`                | Trust `X-Forwarded-Proto` for URL scheme reconstruction        |
+| Option                            | Description                                                                        |
+|-----------------------------------|------------------------------------------------------------------------------------|
+| `WithLongForm()`                  | Use long-form cURL options (e.g., `--request` instead of `-X`)                     |
+| `WithSilent()`                    | Set the flag `-s`, `--silent`                                                      |
+| `WithCompression()`               | Set the flag `--compressed`                                                        |
+| `WithFollowRedirects()`           | Set the flag `-L`, `--location`                                                    |
+| `WithInsecure()`                  | Set the flag `-k`, `--insecure`                                                    |
+| `WithRequestTimeout(seconds int)` | Set the flag `-m`, `--max-time`                                                    |
+| `WithMaxBodySize(bytes int)`      | Override the default 1KB limit. Truncation disables form parsing and JSON masking. |
+| `WithTrustProxy()`                | Trust `X-Forwarded-Proto` for URL scheme reconstruction                            |
 
-### Shell & Formatting
-
-| Option                      | Description                                      |
-|-----------------------------|--------------------------------------------------|
-| `WithMultiLine()`           | Use multi-line output (Unix/Bash style `\`)      |
-| `WithWindowsMultiLine()`    | Use multi-line output (Windows CMD style `^`)    |
-| `WithPowerShellMultiLine()` | Use multi-line output (PowerShell style `` ` ``) |
-| `WithDoubleQuotes()`        | Use double quotes for escaping (Bash only)       |
-
-### Shell & Formatting
+### Shell & formatting
 
 | Option                   | Description                                                                                                    |
 |--------------------------|----------------------------------------------------------------------------------------------------------------|
@@ -169,7 +208,7 @@ When used in middleware, `http.Request` often lacks Scheme and Host. `curling` r
 | `WithTargetShell(shell)` | Set target shell syntax (`POSIX`, `PowerShell`, `WindowsCMD`). Configures escaping and line continuation char. |
 | `WithDoubleQuotes()`     | Use double quotes for escaping (Bash only). Ignored for Windows/PowerShell.                                    |
 
-#### Shell Compatibility Matrix
+#### Shell compatibility matrix
 
 | Shell           | Escaping Strategy                   | Notes                                              |
 |-----------------|-------------------------------------|----------------------------------------------------|
@@ -177,7 +216,7 @@ When used in middleware, `http.Request` often lacks Scheme and Host. `curling` r
 | **PowerShell**  | Backticks (`` ` ``)                 | Enforces double quotes for safety.                 |
 | **Windows CMD** | MS C Runtime rules                  | Enforces double quotes; robust backslash handling. |
 
-### Privacy & Security
+### Privacy & security
 
 | Option                          | Description                                                                                                 | Precedence                       |
 |---------------------------------|-------------------------------------------------------------------------------------------------------------|----------------------------------|
